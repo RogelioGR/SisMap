@@ -2,6 +2,10 @@
 
 Aplicación web progresiva (PWA) que monitorea terremotos en tiempo real usando la API de USGS.
 
+<<<<<<< HEAD
+=======
+<img width="1672" height="941" alt="imagenApp" src="https://github.com/user-attachments/assets/dc69eedc-d350-46ac-84d7-74ded9ac5089" />
+>>>>>>> ba9bdd05abe94e41f9a9ddcbc504bcf97f5e21a1
 
 
 ## Características
@@ -32,3 +36,4 @@ Aplicación web progresiva (PWA) que monitorea terremotos en tiempo real usando 
    ```bash
    git clone https://github.com/RogelioGR/SisMap.git
    cd SisMap
+
