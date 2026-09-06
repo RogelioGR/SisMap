@@ -1,4 +1,3 @@
-
 const Utils = {
     getColorKey: (mag) => {
         if (mag >= 5.9) return 'HIGH';
@@ -53,15 +52,6 @@ const Utils = {
         };
     },
 
-    // ✅ DEBOUNCE PARA PERFORMANCE
-    debounce: (fn, delay) => {
-        let timer;
-        return (...args) => {
-            clearTimeout(timer);
-            timer = setTimeout(() => fn(...args), delay);
-        };
-    },
-
     showToast: (msg, duration = 3000) => {
         const el = document.getElementById('toast');
         if (!el) return;
@@ -96,7 +86,6 @@ const Utils = {
 const MapService = {
     instance: null,
     baseLayer: null,
-    markerCluster: null,
 
     init: () => {
         if (!document.getElementById('map')) return;
@@ -108,7 +97,7 @@ const MapService = {
             maxZoom: Config.MAP.MAX_ZOOM,
             zoomControl: false,
             maxBounds: L.latLngBounds([-85, -180], [85, 180]),
-            preferCanvas: true // ✅ MEJOR PERFORMANCE
+            preferCanvas: true
         });
 
         MapService.updateTheme(document.documentElement.getAttribute('data-theme') || 'dark');
@@ -133,31 +122,21 @@ const MapService = {
         MapService.baseLayer.addTo(MapService.instance);
         setTimeout(() => MapService.instance.invalidateSize(), 100);
     },
-
-    /* SINCRONIZAR MARKERS */
-    syncMarkers: (quakes) => {
+/* SINCRONIZAR MARKERS */
+    syncMarkers: (quakes, visibleQuakes) => {
         if (!MapService.instance) return;
 
         const map = MapService.instance;
         const currentIds = new Set();
-        const visibleFilter = Store.filter;
-
-        const isVisible = (eq) => {
-            if (visibleFilter === 'all') return true;
-            if (visibleFilter === 'red') return eq.mag >= 5.9;
-            if (visibleFilter === 'orange') return eq.mag >= 3.9 && eq.mag < 5.9;
-            if (visibleFilter === 'green') return eq.mag < 3.9;
-            return true;
-        };
+        const visibleIds = new Set((visibleQuakes || quakes).map(eq => eq.id));
 
         quakes.forEach(eq => {
             currentIds.add(eq.id);
+            const shouldBeVisible = visibleIds.has(eq.id);
 
-            /* Verificar si el marker ya existe */
             if (Store.markers[eq.id]) {
                 const marker = Store.markers[eq.id];
                 const wasVisible = map.hasLayer(marker);
-                const shouldBeVisible = isVisible(eq);
 
                 if (wasVisible !== shouldBeVisible) {
                     if (shouldBeVisible) marker.addTo(map);
@@ -184,7 +163,7 @@ const MapService = {
                         closeButton: true
                     });
                 }
-                /* Eventos de popup */
+
                 marker.on('popupopen', () => {
                     marker.setStyle({ radius: r * 1.2 });
                     Utils.announceToScreenReader(`Sismo M${eq.label} en ${eq.place}`);
@@ -200,14 +179,13 @@ const MapService = {
 
                 Store.markers[eq.id] = marker;
 
-                if (isVisible(eq)) {
+                if (shouldBeVisible) {
                     marker.addTo(map);
                 }
             }
         });
 
         /* Limpiar markers eliminados */
-
         for (let id in Store.markers) {
             if (!currentIds.has(id)) {
                 if (map.hasLayer(Store.markers[id])) {
@@ -248,10 +226,47 @@ const UIService = {
 
     shouldShow: (eq) => (UIService._filters[Store.filter] || (() => true))(eq),
 
+    getVisibleQuakes: () => Store.quakes.filter(UIService.shouldShow),
+
+    refreshView: () => {
+        const visible = UIService.getVisibleQuakes();
+        MapService.syncMarkers(Store.quakes, visible);
+        UIService.renderCards(visible);
+    },
+
+
+    initDelegation: () => {
+        const container = document.getElementById('cards');
+        if (!container) return;
+
+        container.addEventListener('click', (e) => {
+            const tsBadge = e.target.closest('.ts-badge');
+            if (tsBadge) {
+                e.stopPropagation();
+                TsunamiService.show(tsBadge.dataset.id);
+                return;
+            }
+            const card = e.target.closest('.eq-card');
+            if (card) {
+                const eq = Store.quakes.find(q => q.id === card.dataset.id);
+                if (eq) UIService.flyToQuake(eq);
+            }
+        });
+
+        container.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            const card = e.target.closest('.eq-card');
+            if (!card) return;
+            e.preventDefault();
+            const eq = Store.quakes.find(q => q.id === card.dataset.id);
+            if (eq) UIService.flyToQuake(eq);
+        });
+    },
+
     createPopupContent: (eq) => {
         const fecha = Utils.formatDate(eq.time, true);
         const depthLbl = eq.depth < 70 ? 'superficial' : eq.depth < 300 ? 'intermedia' : 'profunda';
-        
+
         const tsAlert = eq.tsunami ? `
             <div class="ts-popup-alert">
                 <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> 
@@ -283,49 +298,22 @@ const UIService = {
             </div>
         `;
     },
+    /* Construye una sola tarjeta como nodo DOM (para poder reutilizarla en el diffing) */
 
-    renderCards: () => {
-        const container = document.getElementById('cards');
-        const countEl = document.getElementById('count-text');
-        if (!container) return;
-
-        const filtered = Store.quakes.filter(UIService.shouldShow);
-        
-        if (countEl) {
-            countEl.textContent = `${filtered.length} de ${Store.quakes.length} terremotos`;
-            countEl.setAttribute('aria-live', 'polite');
-        }
-
-        if (filtered.length === 0) {
-    container.innerHTML = `
-        <div class="empty-state" role="status">
-            <div class="empty-icon"><i class="fa-solid fa-magnifying-glass"></i></div>
-            <div class="empty-title">Sin resultados</div>
-        </div>
-    `;
-    return;
-}
-
-        const fragment = document.createDocumentFragment();
+    buildCard: (eq) => {
         const colorMap = { HIGH: 'r', MED: 'o', LOW: 'g' };
+        const wrapper = document.createElement('div');
 
-        filtered.forEach((eq, index) => {
-            const card = document.createElement('div');
-            card.className = `eq-card c${colorMap[eq.colorKey] || 'g'}`;
-            card.style.animationDelay = `${index * 25}ms`;
-            card.setAttribute('role', 'button');
-            card.setAttribute('tabindex', '0');
-            card.setAttribute('aria-label', `Sismo magnitud ${eq.label} en ${eq.place}`);
+        const distBadge = Store.userLocation && eq.distance
+            ? `<span class="dist-badge" aria-label="A ${Math.round(eq.distance)} kilómetros">${Math.round(eq.distance)} km</span>`
+            : '';
 
-            const distBadge = Store.userLocation && eq.distance
-                ? `<span class="dist-badge" aria-label="A ${Math.round(eq.distance)} kilómetros">${Math.round(eq.distance)} km</span>`
-                : '';
+        const tsBadge = eq.tsunami
+            ? `<span class="ts-badge" data-id="${eq.id}" role="alert"> Tsunami</span>`
+            : '';
 
-            const tsBadge = eq.tsunami
-                ? `<span class="ts-badge" onclick="event.stopPropagation(); TsunamiService.show('${eq.id}')" role="alert"> Tsunami</span>`
-                : '';
-
-            card.innerHTML = `
+        wrapper.innerHTML = `
+            <div class="eq-card c${colorMap[eq.colorKey] || 'g'}" data-id="${eq.id}" role="button" tabindex="0" aria-label="Sismo magnitud ${eq.label} en ${eq.place}">
                 <div class="eq-icon" aria-hidden="true"><i class="fa-solid fa-wave-square"></i></div>
                 <div class="eq-content">
                     <div class="eq-place">${eq.place} ${distBadge}</div>
@@ -339,22 +327,52 @@ const UIService = {
                     <div class="mag-val" aria-label="Magnitud ${eq.label}">${eq.label}</div>
                     <div class="mag-lbl">Mag</div>
                 </div>
+            </div>
+        `;
+        return wrapper.firstElementChild;
+    },
+
+    /* Renderiza las tarjetas de terremotos */
+    renderCards: (visibleQuakes) => {
+        const container = document.getElementById('cards');
+        const countEl = document.getElementById('count-text');
+        if (!container) return;
+
+        const filtered = visibleQuakes || UIService.getVisibleQuakes();
+
+        if (countEl) {
+            countEl.textContent = `${filtered.length} de ${Store.quakes.length} terremotos`;
+            countEl.setAttribute('aria-live', 'polite');
+        }
+
+        if (filtered.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state" role="status">
+                    <div class="empty-icon"><i class="fa-solid fa-magnifying-glass"></i></div>
+                    <div class="empty-title">Sin resultados</div>
+                </div>
             `;
+            return;
+        }
 
-            const handler = () => UIService.flyToQuake(eq);
-            card.onclick = handler;
-            card.onkeydown = (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    handler();
-                }
-            };
+        const filteredIds = new Set(filtered.map(eq => eq.id));
 
-            fragment.appendChild(card);
+        /* eliminar tarjetas que ya no aplican (o el empty-state si quedó de antes) */
+        [...container.children].forEach(node => {
+            if (!node.dataset || !filteredIds.has(node.dataset.id)) {
+                node.remove();
+            }
         });
 
-        container.innerHTML = '';
-        container.appendChild(fragment);
+        filtered.forEach((eq, index) => {
+            let card = container.querySelector(`[data-id="${eq.id}"]`);
+            if (!card) {
+                card = UIService.buildCard(eq);
+                card.style.animationDelay = `${index * 25}ms`;
+                container.appendChild(card);
+            }
+            card.style.order = index;
+        });
     },
 
     flyToQuake: (eq) => {
@@ -362,18 +380,15 @@ const UIService = {
         MapService.flyTo(eq);
     },
 
-   setFilter: (filterType) => {
-    Store.filter = filterType;
-    
-    // Buscar botón por texto
-    const map = { all: 'Todos', red: 'Alto', orange: 'Medio', green: 'Bajo' };
-    document.querySelectorAll('.fbtn').forEach(btn => {
-        btn.classList.toggle('active', btn.textContent.trim() === map[filterType]);
-    });
-    
-    UIService.renderCards();
-    MapService.syncMarkers(Store.quakes);
-}
+    setFilter: (filterType) => {
+        Store.filter = filterType;
+
+        document.querySelectorAll('.fbtn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.filter === filterType);
+        });
+
+        UIService.refreshView();
+    }
 };
 
 /* SERVICIO DE DATOS */
@@ -384,7 +399,7 @@ const DataService = {
                 const response = await fetch(url, {
                     method: 'GET',
                     headers: { 'Accept': 'application/json' },
-                    signal: AbortSignal.timeout(10000) // Timeout de 10s
+                    signal: AbortSignal.timeout(10000)
                 });
 
                 if (!response.ok) {
@@ -414,7 +429,6 @@ const DataService = {
                 .slice(0, 100)
                 .map(Utils.normalizeQuake);
 
-            /* Calcular distancias si hay ubicación */
             if (Store.userLocation) {
                 newQuakes.forEach(eq => {
                     eq.distance = Utils.calcDistance(
@@ -423,10 +437,17 @@ const DataService = {
                     );
                 });
             }
-            /* Guardar en IndexedDB */
-            await DBService.saveQuakes(newQuakes).catch(err => {
-                console.warn('[DBService] No se pudo guardar en caché:', err);
-            });
+
+            /* Solo escribir en IndexedDB si el feed realmente cambió
+               (evita I/O innecesario cada 60s cuando no hay novedades) */
+            const changed = newQuakes.length !== Store.quakes.length ||
+                newQuakes[0]?.id !== Store.quakes[0]?.id;
+
+            if (changed) {
+                await DBService.saveQuakes(newQuakes).catch(err => {
+                    console.warn('[DBService] No se pudo guardar en caché:', err);
+                });
+            }
 
             if (!Store.isFirstLoad) {
                 DataService.checkForAlerts(newQuakes);
@@ -444,8 +465,7 @@ const DataService = {
             Store.quakes = newQuakes;
             Store.lastFetchTime = Date.now();
 
-            MapService.syncMarkers(newQuakes);
-            UIService.renderCards();
+            UIService.refreshView();
 
             if (Store.userLocation) LocationService.checkNearby();
 
@@ -455,13 +475,11 @@ const DataService = {
         } catch (error) {
             console.error("[DataService] Error crítico:", error);
 
-            // Intentar cargar desde caché
             try {
                 const cached = await DBService.getQuakes();
                 if (cached.length > 0) {
                     Store.quakes = cached;
-                    MapService.syncMarkers(cached);
-                    UIService.renderCards();
+                    UIService.refreshView();
                     Utils.showToast('Mostrando datos en caché (sin conexión)');
                 }
             } catch (cacheErr) {
@@ -513,8 +531,17 @@ const DataService = {
 /* SERVICIO DE ALERTAS */
 const AlertService = {
     sounds: {},
+    pool: {},
 
-/* configuración centralizada */
+ /* Precarga los audios al iniciar la app */
+    init: () => {
+        Object.entries(Config.AUDIO).forEach(([key, url]) => {
+            const audio = new Audio(url);
+            audio.preload = 'auto';
+            AlertService.pool[key] = audio;
+        });
+    },
+
     _config: {
         tsunami: {
             class: 'ts-alert', eyebrow: 'ALERTA DE TSUNAMI',
@@ -537,16 +564,16 @@ const AlertService = {
     },
 
     play: (type, loop = false, duration = 0) => {
-        AlertService.stop(type); 
-        
-        const url = Config.AUDIO[type] || Config.AUDIO.EARTHQUAKE;
-        const audio = new Audio(url);
+        AlertService.stop(type);
+
+        const base = AlertService.pool[type] || AlertService.pool.EARTHQUAKE;
+        const audio = base ? base.cloneNode(true) : new Audio(Config.AUDIO[type] || Config.AUDIO.EARTHQUAKE);
         audio.volume = type === 'TSUNAMI' ? 0.8 : 0.5;
         audio.loop = loop;
-        
+
         AlertService.sounds[type] = audio;
         audio.play().catch(() => console.warn(`[Audio] ${type} bloqueado por el navegador`));
-        
+
         if (duration > 0) setTimeout(() => AlertService.stop(type), duration);
     },
 
@@ -571,12 +598,12 @@ const AlertService = {
         banner.className = `${cfg.class} show`;
         banner.setAttribute('role', 'alert');
         banner.setAttribute('aria-live', 'assertive');
-        
+
         document.getElementById('ab-icon-wrap').innerHTML = isTsunami ? ICONS.tsunami : ICONS.earthquake;
         document.getElementById('ab-eyebrow').textContent = cfg.eyebrow;
         document.getElementById('ab-title').textContent = typeof cfg.title === 'function' ? cfg.title(eq) : cfg.title;
         document.getElementById('ab-msg').textContent = `${eq.place} · Prof. ${eq.depth.toFixed(0)} km`;
-        
+
         const detEl = document.getElementById('ab-detail');
         detEl.textContent = cfg.detail;
         detEl.onclick = () => { cfg.action(eq); AlertService.hide(); };
@@ -633,7 +660,6 @@ const LocationService = {
                 const { latitude: lat, longitude: lng, accuracy } = pos.coords;
                 Store.userLocation = { lat, lng };
 
-                // Calcular distancias
                 Store.quakes.forEach(eq => {
                     eq.distance = Utils.calcDistance(lat, lng, eq.lat, eq.lng);
                 });
@@ -647,7 +673,7 @@ const LocationService = {
                     });
                 }
 
-                UIService.renderCards();
+                UIService.refreshView();
                 LocationService.checkNearby();
                 Store.isLocating = false;
 
@@ -661,7 +687,7 @@ const LocationService = {
             {
                 enableHighAccuracy: true,
                 timeout: 10000,
-                maximumAge: 300000 // 5 minutos en caché
+                maximumAge: 300000
             }
         );
     },
@@ -715,32 +741,32 @@ const LocationService = {
     }
 };
 
-/* servicio de tsunami */
+/* SERVICIO DE TSUNAMI */
 const TsunamiService = {
-  show: (id) => {
-    const eq = Store.quakes.find(q => q.id === id);
-    if (!eq) {
-      console.warn('[TsunamiService] Evento no encontrado:', id);
-      return;
-    }
-    
-    const modal = document.getElementById('tsunami-modal');
-    if (!modal) {
-      console.error('[TsunamiService] Modal no existe en el DOM');
-      return;
-    }
-    
-    modal.innerHTML = TsunamiService.render(eq);
-    modal.classList.add('open');
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-modal', 'true');
-    
-    requestAnimationFrame(() => {
-      modal.querySelector('.tsm-close')?.focus();
-    });
-  },
-  
-  render: (eq) => `
+    show: (id) => {
+        const eq = Store.quakes.find(q => q.id === id);
+        if (!eq) {
+            console.warn('[TsunamiService] Evento no encontrado:', id);
+            return;
+        }
+
+        const modal = document.getElementById('tsunami-modal');
+        if (!modal) {
+            console.error('[TsunamiService] Modal no existe en el DOM');
+            return;
+        }
+
+        modal.innerHTML = TsunamiService.render(eq);
+        modal.classList.add('open');
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+
+        requestAnimationFrame(() => {
+            modal.querySelector('.tsm-close')?.focus();
+        });
+    },
+
+    render: (eq) => `
     <div class="tsm-head">
       <div class="tsm-title">
         <i class="fa-solid fa-house-tsunami" aria-hidden="true"></i> 
@@ -772,75 +798,78 @@ const TsunamiService = {
       </div>
     </div>
   `,
-  
-  close: () => {
-    const modal = document.getElementById('tsunami-modal');
-    if (!modal) return;
-    
-    modal.classList.remove('open');
-    modal.removeAttribute('role');
-    modal.removeAttribute('aria-modal');
-  }
+
+    close: () => {
+        const modal = document.getElementById('tsunami-modal');
+        if (!modal) return;
+
+        modal.classList.remove('open');
+        modal.removeAttribute('role');
+        modal.removeAttribute('aria-modal');
+    }
 };
 
-/* bottom sheet */
+/* BOTTOM SHEET */
 const BottomSheet = {
     state: 'collapsed',
-    
+
     init: () => {
         const sheet = document.getElementById('bottom-sheet');
         const handle = document.getElementById('sheet-handle');
         if (!sheet || !handle) return;
 
-        let startY, currentY;
+        let startY, currentY, pendingFrame = null;
 
         handle.addEventListener('touchstart', e => {
             startY = e.touches[0].clientY;
             sheet.style.transition = 'none';
         }, { passive: true });
 
+      
         handle.addEventListener('touchmove', e => {
             currentY = e.touches[0].clientY;
             const diff = startY - currentY;
             const max = -window.innerHeight * 0.75;
-            sheet.style.transform = `translateY(${Math.max(max, Math.min(0, diff))}px)`;
-        }, { passive: false });
+            const clamped = Math.max(max, Math.min(0, diff));
+
+            if (pendingFrame) return;
+            pendingFrame = requestAnimationFrame(() => {
+                sheet.style.transform = `translateY(${clamped}px)`;
+                pendingFrame = null;
+            });
+        }, { passive: true });
 
         handle.addEventListener('touchend', () => {
             sheet.style.transition = 'transform 0.3s';
             const y = parseInt(sheet.style.transform.replace(/[^\d-]/g, '')) || 0;
             const h = window.innerHeight;
-            
+
             BottomSheet.set(y < -h * 0.5 ? 'expanded' : y < -h * 0.2 ? 'half' : 'collapsed');
         });
 
-        // Click en header
         document.getElementById('sheet-header')?.addEventListener('click', e => {
             if (!e.target.closest('button')) BottomSheet.toggle();
         });
 
-        // Tecla Escape
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape') BottomSheet.collapse();
         });
     },
 
     toggle: () => BottomSheet.set(BottomSheet.state === 'collapsed' ? 'expanded' : 'collapsed'),
-    
+
     collapse: () => BottomSheet.set('collapsed'),
-    
+
     set: (state) => {
         const sheet = document.getElementById('bottom-sheet');
         if (!sheet) return;
-        
+
         BottomSheet.state = state;
         sheet.className = `bottom-sheet ${state}`;
-        
-        // Rotar icono
+
         const icon = document.getElementById('chevron-icon');
         if (icon) icon.style.transform = state === 'collapsed' ? 'rotate(180deg)' : 'rotate(0)';
-        
-        // Actualizar mapa después de la animación
+
         setTimeout(() => MapService.instance?.invalidateSize(), 300);
     }
 };
@@ -851,11 +880,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const theme = localStorage.getItem('theme') || 'dark';
     document.documentElement.setAttribute('data-theme', theme);
-    
+
     MapService.init();
     BottomSheet.init();
+    UIService.initDelegation();
+    AlertService.init();
 
-/* Permisos y carga de datos */
     if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
     }
@@ -876,14 +906,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         toggleFilters: () => document.getElementById('navbar')?.classList.toggle('show')
     });
 
-    /* Limpieza al cerrar la pestaña */
     window.addEventListener('beforeunload', () => {
         Object.values(Store.timers).forEach(timer => timer && clearTimeout(timer));
         AlertService.stopAll();
         MapService.instance?.remove();
     });
 
-    /* Service Worker */
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('./sw.js')
             .then(reg => console.log('[SW] Registrado:', reg.scope))

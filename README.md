@@ -2,6 +2,8 @@
 
 Aplicación web progresiva (PWA) que monitorea terremotos en tiempo real usando la API de USGS.
 
+
+
 ## Características
 
 - Mapa interactivo con Leaflet y OpenStreetMap
