@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover"/>
+  <meta name="theme-color" content="#0a0a0a"/>
+  <meta name="description" content="Mapa sísmico en tiempo real con alertas de terremotos y tsunami"/>
+  <title>Mapa Sísmico</title>
+
+  <link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mapa Sísmico">
+<link rel="apple-touch-icon" href="./assets/iconoApp.png">
+  <!-- Preconnect para rendimiento -->
+  <link rel="preconnect" href="https://unpkg.com"/>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://earthquake.usgs.gov"/>
+
+  <!-- Favicon -->
+  <link rel="shortcut icon" href="./assets/iconoApp.png" type="image/x-icon">
+
+  <!-- Estilos y Librerías Externas -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"/>
+  <link rel="stylesheet" href="./assets/styles.css"/>
+</head>
+
+<body>
+  
+<div id="app">
+  
+  <!-- HEADER PRINCIPAL -->
+  <header id="header" role="banner">
+    <div class="header-left">
+      <img src="./assets/iconoApp.png" alt="Logo SisMap" class="logo" width="36" height="36" loading="lazy"/>
+      <span class="brand">SisMap</span>
+    </div>
+    <button class="btn-icon theme-toggle" onclick="toggleTheme()" title="Cambiar tema" aria-label="Cambiar entre modo claro y oscuro">
+      <i class="fa-solid fa-moon" id="theme-icon"></i>
+    </button>
+  </header>
+
+  <!-- CONTENIDO PRINCIPAL -->
+  <main id="main">
+    
+    <!-- MAPA INTERACTIVO -->
+    <div id="map" role="application" aria-label="Mapa interactivo de actividad sísmica global"></div>
+
+    <div id="map-ctrl" role="toolbar" aria-label="Controles de navegación del mapa">
+      <button class="btn-icon ctrl ac" onclick="locateMe()" title="Centrar en mi ubicación" aria-label="Obtener geolocalización actual">
+        <i class="fa-solid fa-location-crosshairs"></i>
+      </button>
+    </div>
+
+    <!-- PANEL INFERIOR DESLIZABLE (BOTTOM SHEET) -->
+    <aside id="bottom-sheet" class="bottom-sheet collapsed" aria-label="Panel de información sísmica">
+      
+      <!-- Handle para arrastrar -->
+      <div class="sheet-handle" id="sheet-handle" role="separator" aria-label="Arrastra hacia arriba para expandir"></div>
+      
+      <!-- Cabecera del Panel -->
+      <div class="sheet-header" id="sheet-header">
+        <div class="sheet-title">
+          <i class="fa-solid fa-wave-square" aria-hidden="true"></i>
+          <span>Terremotos recientes</span>
+        </div>
+        <div class="sheet-actions">
+          <button class="sheet-filter-btn" id="filter-toggle" onclick="toggleFilters()" title="Filtrar por magnitud" aria-label="Mostrar opciones de filtro" aria-expanded="false">
+            <i class="fa-solid fa-filter"></i>
+          </button>
+          <button class="sheet-chevron" onclick="toggleSheet()" title="Expandir o colapsar panel" aria-label="Alternar estado del panel">
+            <i class="fa-solid fa-chevron-up" id="chevron-icon"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Contenido Dinámico del Panel -->
+      <div class="sheet-content-wrapper" id="sheet-content">
+        
+        <!-- Barra de Filtros -->
+        <div id="navbar">
+    <button class="fbtn active" data-filter="all" onclick="setFilter('all')" >Todos</button>
+    <button class="fbtn" data-filter="red" onclick="setFilter('red')">Alto</button>
+    <button class="fbtn" data-filter="orange" onclick="setFilter('orange')">Medio</button>
+    <button class="fbtn" data-filter="green" onclick="setFilter('green')">Bajo</button>
+</div>
+        
+        <!-- Información de Estado -->
+        <div class="sheet-info">
+          <span id="count-text"><i class="fa-solid fa-circle-notch fa-spin"></i> Cargando datos…</span>
+          <span id="next-update"><i class="fa-solid fa-rotate-right"></i> --s</span>
+        </div>
+        
+        <!-- Lista de Tarjetas (Se llena vía JS) -->
+        <div id="cards" role="list" aria-label="Lista de eventos sísmicos recientes"></div>
+      </div>
+    </aside>
+
+    <!-- INDICADOR DE CARGA GLOBAL -->
+    <div id="spinner" role="status" aria-live="polite" aria-label="Cargando datos del servidor">
+      <div class="spin"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- NOTIFICACIONES TOAST -->
+<div id="toast" role="alert" aria-live="assertive" aria-atomic="true"></div>
+
+<!-- MODAL DE ALERTA TSUNAMI -->
+<div id="tsunami-modal" role="dialog" aria-modal="true" aria-labelledby="tsm-title" aria-describedby="tsm-desc">
+  <div class="tsm-box" id="tsm-content">
+  </div>
+</div>
+
+<!-- BANNER DE ALERTA SUPERIOR -->
+<div id="alert-banner" role="alert" aria-live="assertive" aria-atomic="true">
+  <div class="ab-icon-wrap" id="ab-icon-wrap"></div>
+  <div class="ab-body">
+    <div class="ab-eyebrow" id="ab-eyebrow">ALERTA SÍSMICA</div>
+    <div class="ab-title" id="ab-title">Sismo de alta magnitud</div>
+    <div class="ab-msg" id="ab-msg"></div>
+    <div class="ab-detail" id="ab-detail" tabindex="0" role="button">Ver en mapa →</div>
+  </div>
+  <button class="ab-close" onclick="hideAlert()" aria-label="Cerrar alerta actual" title="Descartar notificación">✕</button>
+  <div class="ab-progress" id="ab-progress"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="./assets/config.js"></script>
+<script src="./assets/app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => {
+          console.log('[PWA] Service Worker registrado:', reg.scope);
+          
+          // Detectar actualizaciones
+          reg.addEventListener('updatefound', () => {
+            const newWorker = reg.installing;
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                if (confirm('Nueva versión disponible. ¿Recargar para actualizar?')) {
+                  window.location.reload();
+                }
+              }
+            });
+          });
+        })
+        .catch(err => console.error('[PWA] Error al registrar SW:', err));
+    });
+  }
+</script>
+</body>
+</html>

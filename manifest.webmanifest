@@ -1,0 +1,55 @@
+{
+  "name": "SisMap",
+  "short_name": "SisMap",
+  "description": "Monitoreo global de terremotos en tiempo real con alertas de tsunami y geolocalización",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "lang": "es",
+  "categories": ["weather", "utilities", "navigation"],
+  "icons": [
+    {
+      "src": "./assets/iconoApp.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./assets/iconoApp.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Ver mapa completo",
+      "short_name": "Mapa",
+      "description": "Abrir el mapa sísmico global",
+      "url": "./?view=map",
+      "icons": [
+        {
+          "src": "./assets/iconoApp.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Terremotos cercanos",
+      "short_name": "Cercanos",
+      "description": "Ver actividad sísmica cercana a tu ubicación",
+      "url": "./?view=nearby",
+      "icons": [
+        {
+          "src": "./assets/iconoApp.png",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ],
+  "screenshots": [],
+  "related_applications": [],
+  "prefer_related_applications": false
+}
