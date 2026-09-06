@@ -1,6 +1,7 @@
 # SisMap - Mapa Sísmico en Tiempo Real
 
 Aplicación web progresiva (PWA) que monitorea terremotos en tiempo real usando la API de USGS.
+
 <img width="1672" height="941" alt="imagenApp" src="https://github.com/user-attachments/assets/dc69eedc-d350-46ac-84d7-74ded9ac5089" />
 
 
