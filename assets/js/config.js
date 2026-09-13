@@ -58,6 +58,7 @@ const Store = {
   isFirstLoad: true,
   userMarker: null,
   userAccuracyCircle: null,
+  shakeMapOverlay: null, /* nueva función */
   timers: {
     refresh: null,
     toast: null,

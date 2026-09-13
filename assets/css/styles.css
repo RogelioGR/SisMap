@@ -119,7 +119,21 @@ button:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.eq-popup-shakemap {
+    display: block;
+    width: 100%;
+    text-align: center;
+    margin-top: 8px;
+    color: var(--accent) !important;
+    font-weight: 700 !important;
+    transition: all 0.2s ease;
+}
 
+.eq-popup-shakemap:hover {
+    background: rgba(59, 130, 246, 0.2) !important;
+    border-color: var(--accent) !important;
+    transform: translateY(-1px);
+}
 /* Aplicación Principal */
 #app {
   display: flex;

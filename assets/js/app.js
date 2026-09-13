@@ -48,6 +48,8 @@ const Utils = {
             label: mag.toFixed(1),
             isHigh: mag >= 5.9,
             timeStr: Utils.formatDate(props.time),
+            types: props.types || '',       // funcion agregada para obtener los tipos de evento
+            detailUrl: props.detail || '',  // funcion agregada para obtener la URL de detalle
             distance: null
         };
     },
@@ -123,11 +125,7 @@ const MapService = {
         setTimeout(() => MapService.instance.invalidateSize(), 100);
     },
 
-    /* SINCRONIZAR MARKERS
-       Nota de rendimiento: los popups se enlazan de forma perezosa (lazy) pasando
-       una función a bindPopup en vez del HTML ya construido. Leaflet solo invoca
-       esa función cuando el usuario realmente abre el popup, evitando construir
-       hasta 100 strings de HTML en cada refresh de 60s. */
+ 
     syncMarkers: (quakes, visibleQuakes) => {
         if (!MapService.instance) return;
 
@@ -222,7 +220,108 @@ const MapService = {
             }
         }
     },
+    /* =========================================================
+       SERVICIO DE SHAKE MAP (MAPA DE SACUDIMIENTO)
+    ========================================================= */
+       toggleShakeMap: async function(detailUrl) {
+        if (Store.shakeMapOverlay) {
+            this.removeShakeMap();
+        } else {
+            await this.loadShakeMap(detailUrl);
+        }
+        // Actualiza los popups abiertos
+        if (MapService.instance) {
+            MapService.instance.eachLayer(layer => {
+                if (layer.isPopupOpen && layer.isPopupOpen()) {
+                    layer.getPopup().update();
+                }
+            });
+        }
+    },
 
+    loadShakeMap: async function(detailUrl) {
+        if (!MapService.instance) return;
+        const map = MapService.instance;
+
+        if (Store.shakeMapOverlay) {
+            map.removeLayer(Store.shakeMapOverlay);
+            Store.shakeMapOverlay = null;
+        }
+
+        Utils.showToast('Cargando Mapa de Sacudimiento...');
+
+        try {
+            const res = await fetch(detailUrl);
+            const data = await res.json();
+            const products = data.properties?.products;
+
+            if (!products || !products.shakemap) {
+                Utils.showToast('No hay ShakeMap disponible');
+                return;
+            }
+
+            const shakemap = products.shakemap[0];
+            const contents = shakemap.contents || {};
+            const props = shakemap.properties || {};
+
+            // Buscar la imagen
+            let imageUrl = contents['download/overlay.png']?.url || 
+                          contents['download/intensity.jpg']?.url;
+
+            if (!imageUrl) {
+                for (const key in contents) {
+                    if (key.endsWith('.png') || key.endsWith('.jpg')) {
+                        imageUrl = contents[key].url;
+                        break;
+                    }
+                }
+            }
+
+            if (!imageUrl) {
+                Utils.showToast('Imagen no encontrada');
+                return;
+            }
+
+            const minLat = props['minimum-latitude'];
+            const maxLat = props['maximum-latitude'];
+            const minLng = props['minimum-longitude'];
+            const maxLng = props['maximum-longitude'];
+
+            if (minLat === undefined || maxLat === undefined) {
+                Utils.showToast('Coordenadas no disponibles');
+                return;
+            }
+
+            const bounds = L.latLngBounds(
+                [minLat, minLng],
+                [maxLat, maxLng]
+            );
+
+            const overlay = L.imageOverlay(imageUrl, bounds, {
+                opacity: 0.85,
+                interactive: true
+            });
+
+            overlay.addTo(map);
+            Store.shakeMapOverlay = overlay;
+
+            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 9 });
+
+            Utils.showToast('ShakeMap cargado');
+
+        } catch (err) {
+            console.error('[ShakeMap] Error:', err);
+            Utils.showToast('Error al cargar ShakeMap');
+        }
+    },
+
+    removeShakeMap: function() {
+        if (Store.shakeMapOverlay && MapService.instance) {
+            MapService.instance.removeLayer(Store.shakeMapOverlay);
+            Store.shakeMapOverlay = null;
+            Utils.showToast('ShakeMap oculto');
+        }
+    },
     flyTo: (eq) => {
         if (!MapService.instance) return;
 
@@ -291,41 +390,51 @@ const UIService = {
     },
 
     createPopupContent: (eq) => {
-        const fecha = Utils.formatDate(eq.time, true);
-        const depthLbl = eq.depth < 70 ? 'superficial' : eq.depth < 300 ? 'intermedia' : 'profunda';
+    const fecha = Utils.formatDate(eq.time, true);
+    
+    const depthLbl = eq.depth < 70 ? 'superficial' : eq.depth < 300 ? 'intermedia' : 'profunda';
+    const tsAlert = eq.tsunami ? `
+        <div class="ts-popup-alert">
+            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> 
+            ALERTA DE TSUNAMI
+        </div>` : '';
 
-        const tsAlert = eq.tsunami ? `
-            <div class="ts-popup-alert">
-                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> 
-                ALERTA DE TSUNAMI
-            </div>` : '';
+const hasShakeMap = eq.types && eq.types.includes('shakemap');
 
-        return `
-            <div class="eq-popup" role="article" aria-label="Detalles del sismo">
-                <div class="eq-popup-header">
-                    <div class="eq-popup-mag-row">
-                        <span class="eq-popup-mag" style="color:${eq.color}" aria-label="Magnitud ${eq.label}">${eq.label}</span>
-                        <span class="eq-popup-mag-label">Magnitud</span>
-                    </div>
-                    <div class="eq-popup-place">${eq.place}</div>
+    const shakeMapBtn = hasShakeMap ? `
+        <button class="eq-popup-link eq-popup-shakemap" 
+                onclick="MapService.toggleShakeMap('${eq.detailUrl}')"
+                style="margin-top: 8px; background: rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.3); color: var(--accent);">
+            🗺️ Ver Mapa de Sacudimiento
+        </button>
+    ` : '';
+
+    return `
+        <div class="eq-popup" role="article" aria-label="Detalles del sismo">
+            <div class="eq-popup-header">
+                <div class="eq-popup-mag-row">
+                    <span class="eq-popup-mag" style="color:${eq.color}" aria-label="Magnitud ${eq.label}">${eq.label}</span>
+                    <span class="eq-popup-mag-label">Magnitud</span>
                 </div>
-                <div class="eq-popup-grid">
-                    <div class="eq-popup-item">
-                        <div class="eq-popup-label">HORA</div>
-                        <div class="eq-popup-value">${fecha}</div>
-                    </div>
-                    <div class="eq-popup-item">
-                        <div class="eq-popup-label">PROFUNDIDAD</div>
-                        <div class="eq-popup-value">${eq.depth.toFixed(0)} km</div>
-                        <div class="eq-popup-sub">${depthLbl}</div>
-                    </div>
-                </div>
-                ${eq.url ? `<a href="${eq.url}" target="_blank" rel="noopener noreferrer" class="eq-popup-link">Ver en USGS</a>` : ''}
-                ${tsAlert}
+                <div class="eq-popup-place">${eq.place}</div>
             </div>
-        `;
-    },
-    /* Construye una sola tarjeta como nodo DOM (para poder reutilizarla en el diffing) */
+            <div class="eq-popup-grid">
+                <div class="eq-popup-item">
+                    <div class="eq-popup-label">HORA</div>
+                    <div class="eq-popup-value">${fecha}</div>
+                </div>
+                <div class="eq-popup-item">
+                    <div class="eq-popup-label">PROFUNDIDAD</div>
+                    <div class="eq-popup-value">${eq.depth.toFixed(0)} km</div>
+                    <div class="eq-popup-sub">${depthLbl}</div>
+                </div>
+            </div>
+            ${eq.url ? `<a href="${eq.url}" target="_blank" rel="noopener noreferrer" class="eq-popup-link">Ver en USGS</a>` : ''}
+            ${shakeMapBtn}
+            ${tsAlert}
+        </div>
+    `;
+},
 
     buildCard: (eq) => {
         const colorMap = { HIGH: 'r', MED: 'o', LOW: 'g' };
