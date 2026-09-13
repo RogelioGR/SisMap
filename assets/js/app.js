@@ -512,7 +512,7 @@ const DataService = {
 
             if (Store.userLocation) LocationService.checkNearby();
 
-            Utils.showToast(`${newQuakes.length} terremotos cargados`);
+            Utils.showToast(`terremotos cargados`);
             Store.retryCount = 0;
 
         } catch (error) {
@@ -531,10 +531,7 @@ const DataService = {
 
             Utils.showToast('Error al cargar datos. Verifica tu conexión.');
         } finally {
-            /* Oculta el spinner de pantalla completa tras la primera carga,
-               sea exitosa o con error (usando caché o mostrando el toast
-               de error). En los refresh automáticos posteriores el
-               spinner ya está oculto, así que esto no vuelve a hacer nada. */
+     
             SpinnerService.hide();
         }
     },
