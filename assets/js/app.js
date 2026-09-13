@@ -122,13 +122,22 @@ const MapService = {
         MapService.baseLayer.addTo(MapService.instance);
         setTimeout(() => MapService.instance.invalidateSize(), 100);
     },
-/* SINCRONIZAR MARKERS */
+
+    /* SINCRONIZAR MARKERS
+       Nota de rendimiento: los popups se enlazan de forma perezosa (lazy) pasando
+       una función a bindPopup en vez del HTML ya construido. Leaflet solo invoca
+       esa función cuando el usuario realmente abre el popup, evitando construir
+       hasta 100 strings de HTML en cada refresh de 60s. */
     syncMarkers: (quakes, visibleQuakes) => {
         if (!MapService.instance) return;
 
         const map = MapService.instance;
         const currentIds = new Set();
         const visibleIds = new Set((visibleQuakes || quakes).map(eq => eq.id));
+
+        /* Trocear la creación de markers nuevos en lotes para no bloquear
+           el hilo principal con una tarea larga cuando llegan ~100 sismos. */
+        const pending = [];
 
         quakes.forEach(eq => {
             currentIds.add(eq.id);
@@ -143,10 +152,21 @@ const MapService = {
                     else map.removeLayer(marker);
                 }
 
+                // Refresca el contenido del popup de forma perezosa también al actualizar
                 if (typeof UIService.createPopupContent === 'function') {
-                    marker.setPopupContent(UIService.createPopupContent(eq));
+                    marker.getPopup()?.setContent(() => UIService.createPopupContent(eq));
                 }
             } else {
+                pending.push({ eq, shouldBeVisible });
+            }
+        });
+
+        const batchSize = 20;
+        let i = 0;
+        const addBatch = () => {
+            const slice = pending.slice(i, i + batchSize);
+
+            slice.forEach(({ eq, shouldBeVisible }) => {
                 const r = Math.max(eq.mag * 3, 5);
                 const marker = L.circleMarker([eq.lat, eq.lng], {
                     radius: r,
@@ -158,7 +178,7 @@ const MapService = {
                 });
 
                 if (typeof UIService.createPopupContent === 'function') {
-                    marker.bindPopup(UIService.createPopupContent(eq), {
+                    marker.bindPopup(() => UIService.createPopupContent(eq), {
                         maxWidth: 280,
                         closeButton: true
                     });
@@ -182,8 +202,15 @@ const MapService = {
                 if (shouldBeVisible) {
                     marker.addTo(map);
                 }
+            });
+
+            i += batchSize;
+            if (i < pending.length) {
+                (window.requestIdleCallback || window.requestAnimationFrame)(addBatch);
             }
-        });
+        };
+
+        if (pending.length > 0) addBatch();
 
         /* Limpiar markers eliminados */
         for (let id in Store.markers) {
@@ -357,7 +384,6 @@ const UIService = {
 
         const filteredIds = new Set(filtered.map(eq => eq.id));
 
-        /* eliminar tarjetas que ya no aplican (o el empty-state si quedó de antes) */
         [...container.children].forEach(node => {
             if (!node.dataset || !filteredIds.has(node.dataset.id)) {
                 node.remove();
@@ -388,6 +414,23 @@ const UIService = {
         });
 
         UIService.refreshView();
+    }
+};
+
+/* SERVICIO DE SPINNER DE CARGA INICIAL */
+const SpinnerService = {
+    hidden: false,
+
+    hide: () => {
+        if (SpinnerService.hidden) return;
+        SpinnerService.hidden = true;
+
+        const el = document.getElementById('spinner');
+        if (!el) return;
+
+        el.classList.add('hidden');
+        // Lo quita del flujo tras el fade-out para que no bloquee clics
+        setTimeout(() => { el.style.display = 'none'; }, 300);
     }
 };
 
@@ -487,6 +530,12 @@ const DataService = {
             }
 
             Utils.showToast('Error al cargar datos. Verifica tu conexión.');
+        } finally {
+            /* Oculta el spinner de pantalla completa tras la primera carga,
+               sea exitosa o con error (usando caché o mostrando el toast
+               de error). En los refresh automáticos posteriores el
+               spinner ya está oculto, así que esto no vuelve a hacer nada. */
+            SpinnerService.hide();
         }
     },
 
@@ -854,6 +903,13 @@ const BottomSheet = {
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape') BottomSheet.collapse();
         });
+
+     
+        document.addEventListener('pointerdown', e => {
+            if (BottomSheet.state === 'collapsed') return;
+            if (sheet.contains(e.target)) return;
+            BottomSheet.collapse();
+        });
     },
 
     toggle: () => BottomSheet.set(BottomSheet.state === 'collapsed' ? 'expanded' : 'collapsed'),
@@ -906,15 +962,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         toggleFilters: () => document.getElementById('navbar')?.classList.toggle('show')
     });
 
-    window.addEventListener('beforeunload', () => {
+
+    window.addEventListener('pagehide', () => {
         Object.values(Store.timers).forEach(timer => timer && clearTimeout(timer));
         AlertService.stopAll();
-        MapService.instance?.remove();
     });
 
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('./sw.js')
-            .then(reg => console.log('[SW] Registrado:', reg.scope))
-            .catch(err => console.error('[SW] Error:', err));
-    }
+   
 });

@@ -975,8 +975,8 @@ button:focus-visible {
   margin: 0 !important;
   width: auto !important;
   padding: clamp(16px, 4vw, 18px) !important;
-  min-width: min(240px, 80vw) !important;
-  max-width: min(280px, 90vw) !important;
+  min-width: min(280px, 95vw) !important;
+  max-width: min(320px, 95vw) !important;
   line-height: 1.5;
 }
 
@@ -1040,7 +1040,7 @@ button:focus-visible {
 
 /* Popup de terremoto */
 .eq-popup {
-  min-width: min(260px, 85vw);
+  min-width: min(280px, 95vw);
   font-family: var(--font-main);
 }
 

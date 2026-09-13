@@ -1,19 +1,19 @@
-const CACHE_NAME = 'mapa-sismico-v1';
-const STATIC_CACHE = 'static-v1';
+const CACHE_NAME = 'mapa-sismico-v2';
+const STATIC_CACHE = 'static-v2';
 const TILES_CACHE = 'tiles-v1';
 const API_CACHE = 'api-v1';
+
 
 const PRECACHE_ASSETS = [
   './',
   './index.html',
-  './assets/styles.css',
-  './assets/app.js',
-   './assets/config.js',
+  './assets/css/styles.css',
+  './assets/js/app.js',
+  './assets/js/config.js',
   './assets/iconoApp.png',
   './assets/manifest.webmanifest',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css'
+  './assets/css/leaflet.css',
+  './assets/js/leaflet.js'
 ];
 
 const API_URLS = [

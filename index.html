@@ -23,9 +23,10 @@
   <link rel="shortcut icon" href="./assets/iconoApp.png" type="image/x-icon">
 
   <!-- Estilos y Librerías Externas -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="./assets/css/leaflet.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
-  <link rel="stylesheet" href="./assets/styles.css" />
+  <link rel="stylesheet" href="./assets/css/styles.css" />
+  <link rel="stylesheet" href="./assets/css/Loader.css" />
 </head>
 
 <body>
@@ -98,9 +99,15 @@
         </div>
       </aside>
 
-      <div id="spinner" role="status" aria-live="polite" aria-label="Cargando datos del servidor">
-        <div class="spin"></div>
-      </div>
+<div id="spinner" role="status" aria-live="polite" aria-label="Cargando datos del servidor">
+  <div class="loader">
+    <div class="dot dot-1"></div>
+    <div class="dot dot-2"></div>
+    <div class="dot dot-3"></div>
+    <div class="dot dot-4"></div>
+    <div class="dot dot-5"></div>
+  </div>
+</div>
 
     </main>
   </div>
@@ -127,9 +134,9 @@
     <div class="ab-progress" id="ab-progress"></div>
   </div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="./assets/config.js"></script>
-  <script src="./assets/app.js"></script>
+<script src="./assets/js/leaflet.js" defer></script>
+  <script src="./assets/js/config.js"></script>
+  <script src="./assets/js/app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
