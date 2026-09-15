@@ -6,34 +6,22 @@
   --card: #1a1a1a;
   --card-hover: #222222;
   --border: #2a2a2a;
-
-  /* Textos */
   --text: #e0e0e0;
   --text-secondary: #888888;
   --muted: #666666;
-
-  /* Acentos y Estados */
   --accent: #3b82f6;
   --red: #ef4444;
   --orange: #f97316;
   --green: #22c55e;
-
-  /* Efectos */
   --shadow: rgba(0, 0, 0, 0.8);
   --glass-bg: rgba(20, 20, 20, 0.85);
   --glass-border: rgba(255, 255, 255, 0.08);
-
-  /* radios por defecto */
-  --radius-data: 4px;   
-  --radius-sm: 8px;     
-  --radius-md: 12px;    
-  --radius-lg: 24px;    
-
-  /* Tipografía */
+  --radius-data: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 24px;
   --font-main: 'Space Grotesk', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
-
-  /* Medidas fluidas reutilizables */
   --sheet-collapsed-height: clamp(80px, 20vw, 90px);
   --space-xs: clamp(6px, 1.5vw, 8px);
   --space-sm: clamp(8px, 2vw, 12px);
@@ -41,7 +29,6 @@
   --space-lg: clamp(16px, 4vw, 20px);
 }
 
-/* Modo Claro */
 [data-theme="light"] {
   --bg: #f5f5f5;
   --surface: #ffffff;
@@ -90,7 +77,6 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
-/* Panel de Vidrio */
 .glass-panel {
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
@@ -119,27 +105,12 @@ button:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.eq-popup-shakemap {
-    display: block;
-    width: 100%;
-    text-align: center;
-    margin-top: 8px;
-    color: var(--accent) !important;
-    font-weight: 700 !important;
-    transition: all 0.2s ease;
-}
 
-.eq-popup-shakemap:hover {
-    background: rgba(59, 130, 246, 0.2) !important;
-    border-color: var(--accent) !important;
-    transform: translateY(-1px);
-}
-/* Aplicación Principal */
 #app {
   display: flex;
   flex-direction: column;
 }
-/* header de la aplicación */
+
 #header {
   display: flex;
   align-items: center;
@@ -148,9 +119,7 @@ button:focus-visible {
   padding-top: max(var(--space-md), env(safe-area-inset-top));
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  background-image:
-    linear-gradient(var(--surface), var(--surface)),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='40' viewBox='0 0 400 40'%3E%3Cpath d='M0 20 L40 20 L48 8 L56 32 L64 20 L400 20' fill='none' stroke='%232a2a2a' stroke-width='1'/%3E%3C/svg%3E");
+  background-image: linear-gradient(var(--surface), var(--surface)), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='40' viewBox='0 0 400 40'%3E%3Cpath d='M0 20 L40 20 L48 8 L56 32 L64 20 L400 20' fill='none' stroke='%232a2a2a' stroke-width='1'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right -20px center;
   background-size: min(260px, 60vw) 40px;
@@ -159,9 +128,7 @@ button:focus-visible {
 }
 
 [data-theme="light"] #header {
-  background-image:
-    linear-gradient(var(--surface), var(--surface)),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='40' viewBox='0 0 400 40'%3E%3Cpath d='M0 20 L40 20 L48 8 L56 32 L64 20 L400 20' fill='none' stroke='%23e0e0e0' stroke-width='1'/%3E%3C/svg%3E");
+  background-image: linear-gradient(var(--surface), var(--surface)), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='40' viewBox='0 0 400 40'%3E%3Cpath d='M0 20 L40 20 L48 8 L56 32 L64 20 L400 20' fill='none' stroke='%23e0e0e0' stroke-width='1'/%3E%3C/svg%3E");
 }
 
 .header-left {
@@ -183,6 +150,10 @@ button:focus-visible {
   letter-spacing: -0.3px;
 }
 
+.header-actions {
+  display: flex;
+  gap: var(--space-xs);
+}
 
 #main {
   flex: 1;
@@ -197,7 +168,6 @@ button:focus-visible {
   z-index: 1;
 }
 
-/* Controles Flotantes del Mapa */
 #map-ctrl {
   position: absolute;
   right: 12px;
@@ -212,7 +182,9 @@ button:focus-visible {
   color: var(--accent);
   border-color: rgba(59, 130, 246, 0.3);
 }
-/* Panel Inferior */
+
+
+
 .bottom-sheet {
   position: absolute;
   bottom: 0;
@@ -241,7 +213,6 @@ button:focus-visible {
   transform: translateY(0);
 }
 
-/* Handle y Header del Sheet */
 .sheet-handle {
   width: 36px;
   height: 4px;
@@ -312,7 +283,6 @@ button:focus-visible {
   color: var(--text);
 }
 
-/* Contenido Interno del Sheet */
 .sheet-content-wrapper {
   overflow: hidden;
   flex: 1;
@@ -328,7 +298,6 @@ button:focus-visible {
   opacity: 1;
 }
 
-/* Barra de Filtros */
 #navbar {
   display: none;
   gap: var(--space-xs);
@@ -386,7 +355,6 @@ button:focus-visible {
   color: var(--text);
 }
 
-/* Información del Sheet */
 .sheet-info {
   display: flex;
   justify-content: space-between;
@@ -434,7 +402,6 @@ button:focus-visible {
   }
 }
 
-/* Lista de Cards */
 #cards {
   flex: 1;
   overflow-y: auto;
@@ -454,7 +421,6 @@ button:focus-visible {
   border-radius: 2px;
 }
 
-/* Tarjeta de Terremoto */
 .eq-card {
   background: var(--card);
   border-radius: var(--radius-data);
@@ -473,7 +439,6 @@ button:focus-visible {
   background: var(--card-hover);
 }
 
-/* Icono de la Card */
 .eq-icon {
   width: clamp(34px, 8vw, 40px);
   height: clamp(34px, 8vw, 40px);
@@ -488,7 +453,6 @@ button:focus-visible {
   font-family: var(--font-mono);
 }
 
-/* Colores por Magnitud */
 .eq-card.cg .eq-icon,
 .eq-card.cg .mag-val {
   color: var(--green);
@@ -504,7 +468,6 @@ button:focus-visible {
   color: var(--red);
 }
 
-/* Contenido de Texto */
 .eq-content {
   flex: 1;
   min-width: 0;
@@ -539,7 +502,6 @@ button:focus-visible {
   gap: 4px;
 }
 
-/* Badge de Tsunami */
 .ts-badge {
   display: inline-flex;
   align-items: center;
@@ -555,7 +517,6 @@ button:focus-visible {
   margin-top: 4px;
 }
 
-/* Sección de Magnitud */
 .eq-mag {
   text-align: right;
   flex-shrink: 0;
@@ -589,9 +550,6 @@ button:focus-visible {
   }
 }
 
-/* Componentes Adicionales */
-
-/* Spinner */
 #spinner {
   display: none;
   position: absolute;
@@ -621,7 +579,6 @@ button:focus-visible {
   }
 }
 
-/* Toast */
 #toast {
   position: fixed;
   bottom: 90px;
@@ -647,7 +604,6 @@ button:focus-visible {
   transform: translateX(-50%) translateY(0);
 }
 
-/* Alert Banner Superior */
 #alert-banner {
   position: fixed;
   top: -160px;
@@ -678,7 +634,6 @@ button:focus-visible {
   border-color: var(--red);
 }
 
-/* Modo Claro alerta */
 [data-theme="light"] #alert-banner.eq-alert {
   background: var(--orange);
   border-color: var(--orange);
@@ -810,7 +765,6 @@ button:focus-visible {
   animation: ab-shrink linear forwards;
 }
 
-/* Modal Tsunami */
 #tsunami-modal {
   display: none;
   position: fixed;
@@ -967,9 +921,6 @@ button:focus-visible {
   color: var(--red);
 }
 
-/* =========================================================
-   6. MAPA (LEAFLET)
-   ========================================================= */
 .leaflet-container {
   background: var(--bg);
   font-family: var(--font-main);
@@ -1052,7 +1003,6 @@ button:focus-visible {
   }
 }
 
-/* Popup de terremoto */
 .eq-popup {
   min-width: min(280px, 95vw);
   font-family: var(--font-main);
@@ -1126,17 +1076,41 @@ button:focus-visible {
   color: var(--muted);
 }
 
-.eq-popup-link {
-  display: block;
-  text-align: center;
-  padding: 8px;
-  background: var(--surface);
+/* Botones de acción en Popup */
+.eq-popup-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--accent);
+  color: var(--text);
   text-decoration: none;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.eq-popup-action:hover {
+  background: var(--card-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.eq-popup-shakemap {
+  background: rgba(59, 130, 246, 0.1) !important;
+  border-color: rgba(59, 130, 246, 0.3) !important;
+  color: var(--accent) !important;
+}
+
+.eq-popup-shakemap:hover {
+  background: rgba(59, 130, 246, 0.2) !important;
+  border-color: var(--accent) !important;
 }
 
 .ts-popup-alert {
@@ -1159,7 +1133,6 @@ button:focus-visible {
   margin-left: 6px;
   font-family: var(--font-mono);
 }
-
 
 @media (min-width: 768px) {
   .bottom-sheet {

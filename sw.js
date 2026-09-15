@@ -11,7 +11,7 @@ const PRECACHE_ASSETS = [
   './assets/js/app.js',
   './assets/js/config.js',
   './assets/iconoApp.png',
-  './assets/manifest.webmanifest',
+  './manifest.webmanifest',
   './assets/css/leaflet.css',
   './assets/js/leaflet.js'
 ];
@@ -188,9 +188,7 @@ async function staleWhileRevalidate(request) {
   return cached || fetchPromise;
 }
 
-/* =========================================================
-   MENSAJES DESDE LA APP
-   ========================================================= */
+
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
@@ -205,12 +203,9 @@ self.addEventListener('message', (event) => {
   }
 });
 
-/* =========================================================
-   BACKGROUND SYNC
-   ========================================================= */
+
 self.addEventListener('sync', (event) => {
   if (event.tag === 'sync-earthquakes') {
-    console.log('[SW] Sincronización en segundo plano activada');
     event.waitUntil(
       fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson')
         .then(response => {
