@@ -25,6 +25,7 @@
             <div class="header-actions">
                 <button class="btn-icon" onclick="locateMe()" title="Mi ubicación"><i class="fa-solid fa-location-crosshairs"></i></button>
                 <button class="btn-icon" onclick="toggleTheme()" title="Cambiar tema"><i class="fa-solid fa-moon"></i></button>
+                <button class="btn-icon" onclick="SettingsService.open()" title="Ajustes" aria-label="Abrir panel de ajustes"><i class="fa-solid fa-sliders"></i></button>
             </div>
         </header>
 
@@ -59,6 +60,9 @@
                 <div class="sheet-content-wrapper">
                     <div class="sheet-info">
                         <span id="count-text">Cargando datos…</span>
+                        <span id="conn-status" class="conn-status online" role="status">
+                            <i class="fa-solid fa-wifi" aria-hidden="true"></i> <span id="conn-status-text">En línea</span>
+                        </span>
                         <span id="next-update"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> 60s</span>
                     </div>
                     <div id="cards"></div>
@@ -92,6 +96,56 @@
     </div>
 
     <div id="tsunami-modal"></div>
+
+    <!-- PANEL DE AJUSTES -->
+    <div id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="set-title">
+        <div class="set-box">
+            <div class="set-head">
+                <div class="set-title" id="set-title">
+                    <i class="fa-solid fa-sliders" aria-hidden="true"></i> Ajustes
+                </div>
+                <button class="set-close" onclick="SettingsService.close()" aria-label="Cerrar ajustes"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="set-body">
+                <div class="set-group">
+                    <label class="set-label" for="set-radius">Radio de sismos cercanos</label>
+                    <select id="set-radius" class="set-control" onchange="SettingsService.save({ nearbyRadiusKm: parseInt(this.value) })">
+                        <option value="200">200 km</option>
+                        <option value="500">500 km</option>
+                        <option value="1000">1000 km</option>
+                        <option value="1500">1500 km</option>
+                        <option value="3000">3000 km</option>
+                        <option value="5000">5000 km</option>
+                    </select>
+                </div>
+                <div class="set-group">
+                    <label class="set-label" for="set-threshold">Magnitud mínima para alertar</label>
+                    <select id="set-threshold" class="set-control" onchange="SettingsService.save({ alertThreshold: parseFloat(this.value) })">
+                        <option value="4.5">M 4.5+</option>
+                        <option value="5.0">M 5.0+</option>
+                        <option value="5.5">M 5.5+</option>
+                        <option value="5.9">M 5.9+</option>
+                        <option value="6.5">M 6.5+</option>
+                        <option value="7.0">M 7.0+</option>
+                    </select>
+                </div>
+                <div class="set-group">
+                    <label class="set-label" for="set-unit">Unidad de distancia</label>
+                    <select id="set-unit" class="set-control" onchange="SettingsService.save({ distanceUnit: this.value })">
+                        <option value="km">Kilómetros (km)</option>
+                        <option value="mi">Millas (mi)</option>
+                    </select>
+                </div>
+                <div class="set-group set-toggle-row">
+                    <label class="set-label" for="set-sound">Sonido de alertas</label>
+                    <label class="set-switch">
+                        <input type="checkbox" id="set-sound" onchange="SettingsService.save({ soundEnabled: this.checked })">
+                        <span class="set-switch-track"></span>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script src="./assets/js/config.js"></script>
     <script src="./assets/js/leaflet.js"></script>

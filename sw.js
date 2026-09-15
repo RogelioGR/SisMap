@@ -11,7 +11,7 @@ const PRECACHE_ASSETS = [
   './assets/js/app.js',
   './assets/js/config.js',
   './assets/iconoApp.png',
-  './manifest.webmanifest',
+  './assets/manifest.webmanifest',  
   './assets/css/leaflet.css',
   './assets/js/leaflet.js'
 ];
@@ -68,25 +68,19 @@ self.addEventListener('activate', (event) => {
    ========================================================= */
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  
-  // 1. Ignorar peticiones que no sean GET
+
   if (request.method !== 'GET') return;
-  
-  // 2. IGNORAR extensiones de Chrome y protocolos no HTTP/HTTPS
-  // Esto soluciona el error "chrome-extension is unsupported"
   if (!request.url.startsWith('http://') && !request.url.startsWith('https://')) {
     return;
   }
 
   const url = new URL(request.url);
   
-  // ESTRATEGIA 1: API de USGS - Network First con fallback a caché
   if (url.hostname === 'earthquake.usgs.gov') {
     event.respondWith(networkFirstWithCache(request, API_CACHE));
     return;
   }
   
-  // ESTRATEGIA 2: Tiles del mapa - Cache First con límite
   if (url.hostname.includes('cartocdn.com') || 
       url.hostname.includes('openstreetmap.org') ||
       url.hostname.includes('opentopomap.org')) {
@@ -94,13 +88,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
-  // ESTRATEGIA 3: Assets estáticos (JS, CSS, fuentes, imágenes) - Cache First
   if (url.pathname.match(/\.(js|css|woff2|ttf|png|jpg|svg|webmanifest)$/)) {
     event.respondWith(cacheFirst(request, STATIC_CACHE));
     return;
   }
-  
-  // ESTRATEGIA 4: HTML y otros - Stale While Revalidate
   event.respondWith(staleWhileRevalidate(request));
 });
 

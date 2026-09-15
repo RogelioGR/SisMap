@@ -9,6 +9,15 @@ const Config = {
     NEARBY_RADIUS_KM: 1500,
     MAX_RETRY_ATTEMPTS: 3,
     RETRY_DELAY: 1000,
+
+    // Ajustables desde el panel de configuración (valores por defecto)
+    ALERT: {
+        HIGH_THRESHOLD: 5.9,
+        NEARBY_MIN_MAG: 3.0
+    },
+    SOUND_ENABLED: true,
+    DISTANCE_UNIT: 'km', 
+
     COLORS: {
         HIGH: '#ef4444',
         MED: '#f97316',
@@ -52,7 +61,7 @@ const Store = {
     isFirstLoad: true,
     userMarker: null,
     userAccuracyCircle: null,
-    shakeMapOverlay: null, // 👈 Agregado para ShakeMap
+    shakeMapOverlay: null, // Agregado para ShakeMap
     timers: {
         refresh: null,
         toast: null,
@@ -61,7 +70,8 @@ const Store = {
     },
     audioContext: {},
     retryCount: 0,
-    lastFetchTime: 0
+    lastFetchTime: 0,
+    isOnline: true
 };
 
 const ICONS = {

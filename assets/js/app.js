@@ -39,12 +39,27 @@ const Utils = {
             colorKey: colorKey,
             color: Utils.getColor(colorKey),
             label: mag.toFixed(1),
-            isHigh: mag >= 5.9,
+            isHigh: mag >= Config.ALERT.HIGH_THRESHOLD,
             timeStr: Utils.formatDate(props.time),
-            types: props.types || '',       // 👈 Agregado para ShakeMap
-            detailUrl: props.detail || '',  // 👈 Agregado para ShakeMap
+            types: props.types || '',       //  Agregado para ShakeMap
+            detailUrl: props.detail || '',  // Agregado para ShakeMap
             distance: null
         };
+    },
+    timeAgo: (timestamp) => {
+        if (!timestamp) return '';
+        const diffSec = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+        if (diffSec < 60) return 'justo ahora';
+        const diffMin = Math.floor(diffSec / 60);
+        if (diffMin < 60) return `hace ${diffMin} min`;
+        const diffH = Math.floor(diffMin / 60);
+        return `hace ${diffH} h`;
+    },
+    formatDistance: (km) => {
+        if (Config.DISTANCE_UNIT === 'mi') {
+            return `${Math.round(km * 0.621371)} mi`;
+        }
+        return `${Math.round(km)} km`;
     },
     showToast: (msg, duration = 3000) => {
         const el = document.getElementById('toast');
@@ -305,7 +320,7 @@ const UIService = {
             navigator.share({ title: `Sismo M${eq.label} - SisMap`, text: text }).catch(() => {});
         } else {
             navigator.clipboard.writeText(text).then(() => {
-                Utils.showToast('📋 Información copiada al portapapeles');
+                Utils.showToast(' Información copiada al portapapeles');
             }).catch(() => {
                 Utils.showToast('No se pudo compartir');
             });
@@ -364,7 +379,7 @@ const UIService = {
         const colorMap = { HIGH: 'r', MED: 'o', LOW: 'g' };
         const wrapper = document.createElement('div');
         const distBadge = Store.userLocation && eq.distance
-            ? `<span class="dist-badge" aria-label="A ${Math.round(eq.distance)} kilómetros">${Math.round(eq.distance)} km</span>`
+            ? `<span class="dist-badge" aria-label="A ${Utils.formatDistance(eq.distance)}">${Utils.formatDistance(eq.distance)}</span>`
             : '';
         const tsBadge = eq.tsunami
             ? `<span class="ts-badge" data-id="${eq.id}" role="alert"> Tsunami</span>`
@@ -520,7 +535,9 @@ const DataService = {
                 console.warn('[DataService] No hay caché disponible');
             }
             Utils.showToast('Error al cargar datos. Verifica tu conexión.');
+            ConnectionService.requestBackgroundSync();
         } finally {
+            ConnectionService.render();
             SpinnerService.hide();
         }
     },
@@ -548,11 +565,13 @@ const DataService = {
             if (countdown <= 0) {
                 countdown = Config.REFRESH_INTERVAL;
                 DataService.fetchQuakes();
+            } else {
+                ConnectionService.render();
             }
         };
         Store.timers.refresh = setInterval(updateCountdown, 1000);
     },
-    // 👇 NUEVA FUNCIÓN: Alertas de Tsunami NOAA 👇
+    /* alertas de tsunami */
     fetchActiveTsunamiAlerts: async () => {
         try {
             const res = await fetch('https://api.weather.gov/alerts/active?event=Tsunami%20Warning,Tsunami%20Watch,Tsunami%20Advisory');
@@ -598,7 +617,7 @@ const AlertService = {
         },
         nearby: {
             class: 'eq-alert', eyebrow: 'TERREMOTO CERCANO',
-            title: (eq) => `M ${eq.label} a ${Math.round(eq.distance)} km`, sound: 'NEARBY',
+            title: (eq) => `M ${eq.label} a ${Utils.formatDistance(eq.distance)}`, sound: 'NEARBY',
             duration: 0, detail: 'Ver en mapa →',
             action: (eq) => UIService.flyToQuake(eq), notify: 'Sismo Cercano'
         },
@@ -611,6 +630,7 @@ const AlertService = {
     },
     play: (type, loop = false, duration = 0) => {
         AlertService.stop(type);
+        if (!Config.SOUND_ENABLED) return;
         const base = AlertService.pool[type] || AlertService.pool.EARTHQUAKE;
         const audio = base ? base.cloneNode(true) : new Audio(Config.AUDIO[type] || Config.AUDIO.EARTHQUAKE);
         audio.volume = type === 'TSUNAMI' ? 0.8 : 0.5;
@@ -650,6 +670,7 @@ const AlertService = {
         }
         clearTimeout(Store.timers.alert);
         Store.timers.alert = setTimeout(() => AlertService.hide(), 8000);
+        AlertService.play(cfg.sound, false, cfg.duration || 8000);
         if ('Notification' in window && Notification.permission === 'granted') {
             new Notification(cfg.notify, { body: eq.place, icon: './assets/iconoApp.png', requireInteraction: true });
         }
@@ -732,7 +753,7 @@ const LocationService = {
         if (!Store.userLocation) return;
         const nearby = Store.quakes.filter(eq =>
             eq.distance <= Config.NEARBY_RADIUS_KM &&
-            eq.mag >= 3.0 &&
+            eq.mag >= Config.ALERT.NEARBY_MIN_MAG &&
             !Store.notifiedNearby[eq.id]
         );
         if (nearby.length > 0) {
@@ -864,6 +885,112 @@ const BottomSheet = {
     }
 };
 
+/* SERVICIO DE AJUSTES DEL USUARIO */
+const SettingsService = {
+    KEY: 'userPrefs',
+    DEFAULTS: {
+        nearbyRadiusKm: Config.NEARBY_RADIUS_KM,
+        alertThreshold: Config.ALERT.HIGH_THRESHOLD,
+        distanceUnit: Config.DISTANCE_UNIT,
+        soundEnabled: Config.SOUND_ENABLED
+    },
+    load: async () => {
+        let prefs = SettingsService.DEFAULTS;
+        try {
+            const saved = await DBService.getSetting(SettingsService.KEY);
+            if (saved) prefs = { ...SettingsService.DEFAULTS, ...saved };
+        } catch (err) {
+            console.warn('[SettingsService] No se pudieron cargar los ajustes:', err);
+        }
+        SettingsService.apply(prefs);
+        SettingsService.populateForm(prefs);
+    },
+    apply: (prefs) => {
+        Config.NEARBY_RADIUS_KM = prefs.nearbyRadiusKm;
+        Config.ALERT.HIGH_THRESHOLD = prefs.alertThreshold;
+        Config.DISTANCE_UNIT = prefs.distanceUnit;
+        Config.SOUND_ENABLED = prefs.soundEnabled;
+        if (Store.quakes.length) {
+            Store.quakes.forEach(eq => { eq.isHigh = eq.mag >= Config.ALERT.HIGH_THRESHOLD; });
+            UIService.refreshView();
+        }
+    },
+    populateForm: (prefs) => {
+        const radius = document.getElementById('set-radius');
+        const threshold = document.getElementById('set-threshold');
+        const unit = document.getElementById('set-unit');
+        const sound = document.getElementById('set-sound');
+        if (radius) radius.value = String(prefs.nearbyRadiusKm);
+        if (threshold) threshold.value = String(prefs.alertThreshold);
+        if (unit) unit.value = prefs.distanceUnit;
+        if (sound) sound.checked = prefs.soundEnabled;
+    },
+    save: async (patch) => {
+        const current = {
+            nearbyRadiusKm: Config.NEARBY_RADIUS_KM,
+            alertThreshold: Config.ALERT.HIGH_THRESHOLD,
+            distanceUnit: Config.DISTANCE_UNIT,
+            soundEnabled: Config.SOUND_ENABLED
+        };
+        const merged = { ...current, ...patch };
+        SettingsService.apply(merged);
+        try {
+            await DBService.saveSetting(SettingsService.KEY, merged);
+            Utils.showToast('Ajustes guardados');
+        } catch (err) {
+            console.warn('[SettingsService] No se pudieron guardar los ajustes:', err);
+            Utils.showToast('No se pudo guardar el ajuste');
+        }
+    },
+    open: () => document.getElementById('settings-modal')?.classList.add('open'),
+    close: () => document.getElementById('settings-modal')?.classList.remove('open')
+};
+
+/* SERVICIO DE CONEXIÓN (estado online/offline + Background Sync) */
+const ConnectionService = {
+    init: () => {
+        Store.isOnline = navigator.onLine;
+        ConnectionService.render();
+        window.addEventListener('online', () => {
+            Store.isOnline = true;
+            ConnectionService.render();
+            Utils.showToast('Conexión restablecida, actualizando…');
+            DataService.fetchQuakes();
+        });
+        window.addEventListener('offline', () => {
+            Store.isOnline = false;
+            ConnectionService.render();
+            Utils.showToast('Sin conexión. Mostrando datos guardados.');
+        });
+    },
+    render: () => {
+        const el = document.getElementById('conn-status');
+        const txt = document.getElementById('conn-status-text');
+        if (!el || !txt) return;
+        el.classList.toggle('online', Store.isOnline);
+        el.classList.toggle('offline', !Store.isOnline);
+        const icon = el.querySelector('i');
+        if (icon) icon.className = Store.isOnline ? 'fa-solid fa-wifi' : 'fa-solid fa-wifi-slash';
+        if (!Store.isOnline) {
+            txt.textContent = 'Sin conexión';
+        } else if (Store.lastFetchTime) {
+            txt.textContent = `Actualizado ${Utils.timeAgo(Store.lastFetchTime)}`;
+        } else {
+            txt.textContent = 'En línea';
+        }
+    },
+    requestBackgroundSync: async () => {
+        try {
+            if ('serviceWorker' in navigator && 'SyncManager' in window) {
+                const reg = await navigator.serviceWorker.ready;
+                await reg.sync.register('sync-earthquakes');
+            }
+        } catch (err) {
+            console.warn('[ConnectionService] Background Sync no disponible:', err);
+        }
+    }
+};
+
 /* Inicialización */
 document.addEventListener('DOMContentLoaded', async () => {
     await DBService.init?.().catch(err => console.warn('[DB] Error:', err));
@@ -873,12 +1000,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     BottomSheet.init();
     UIService.initDelegation();
     AlertService.init();
+    ConnectionService.init();
+    await SettingsService.load().catch(err => console.warn('[Settings] Error:', err));
     if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
     }
     DataService.fetchQuakes();
     DataService.startAutoRefresh();
-    DataService.fetchActiveTsunamiAlerts(); // 👈 Agregado: Verificar alertas al iniciar
+    DataService.fetchActiveTsunamiAlerts(); 
 
     Object.assign(window, {
         toggleTheme: () => {
