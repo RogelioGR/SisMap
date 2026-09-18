@@ -315,8 +315,7 @@ const UIService = {
         });
     },
     shareQuake: (eq) => {
-        const text = `🚨 *Sismo M${eq.label}* registrado en:\n📍 ${eq.place}\n📏 Profundidad: ${eq.depth.toFixed(0)} km\n🔗 Más info: ${eq.url || 'SisMap'}`;
-        if (navigator.share) {
+const text = `[SISMAP] Sismo M${eq.label} registrado en:\nUbicación: ${eq.place}\nProfundidad: ${eq.depth.toFixed(0)} km\nMás info: ${eq.url || 'SisMap'}`;        if (navigator.share) {
             navigator.share({ title: `Sismo M${eq.label} - SisMap`, text: text }).catch(() => {});
         } else {
             navigator.clipboard.writeText(text).then(() => {
@@ -336,16 +335,18 @@ const UIService = {
             </div>` : '';
         
         const shareBtn = `
-            <button class="eq-popup-link eq-popup-action" onclick="UIService.shareQuake(Store.quakes.find(q => q.id === '${eq.id}'))">
-                📤 Compartir este sismo
-            </button>
+  <button class="eq-popup-link eq-popup-action" onclick="UIService.shareQuake(Store.quakes.find(q => q.id === '${eq.id}'))">
+        <img src="./assets/iconoApp.png" alt="" style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">
+        Compartir este sismo
+    </button>
         `;
 
         const hasShakeMap = eq.types && eq.types.includes('shakemap');
         const shakeMapBtn = hasShakeMap ? `
-            <button class="eq-popup-link eq-popup-action eq-popup-shakemap" onclick="MapService.toggleShakeMap('${eq.detailUrl}')">
-                🗺️ Ver Mapa de Sacudimiento
-            </button>
+              <button class="eq-popup-link eq-popup-action eq-popup-shakemap" onclick="MapService.toggleShakeMap('${eq.detailUrl}')">
+        <img src="./assets/iconoApp.png" alt="" style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">
+        Ver Mapa de Sacudimiento
+    </button>
         ` : '';
 
         return `
