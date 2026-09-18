@@ -1,19 +1,20 @@
 {
   "name": "Mapa Sísmico",
   "short_name": "SisMap",
-  "start_url": "./index.html",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",
   "theme_color": "#0a0a0a",
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "./iconoApp.png",
+      "src": "/assets/iconoApp.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "./iconoApp.png",
+      "src": "/assets/iconoApp.png",
       "sizes": "512x512",
       "type": "image/png"
     }
