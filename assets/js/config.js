@@ -39,6 +39,19 @@ const Config = {
         ATTRIBUTION: '© OpenStreetMap contributors',
         ATTRIBUTION_DARK: '© OpenStreetMap contributors © CARTO'
     },
+    // Rutas de evacuación mapeadas en OpenStreetMap (relation route=evacuation), vía Overpass API.
+    // Cobertura muy dispersa a nivel mundial: solo aparecerán donde una comunidad/autoridad local las haya cargado a OSM.
+    EVACUATION: {
+        OVERPASS_URL: 'https://overpass-api.de/api/interpreter',
+        SEARCH_RADIUS_KM: 50,
+        COLORS: {
+            tsunami: '#38bdf8',
+            hurricane: '#a78bfa',
+            flood: '#22d3ee',
+            nuclear: '#facc15',
+            default: '#f97316'
+        }
+    },
     DB: {
         NAME: 'seismic-db',
         VERSION: 1,
@@ -71,7 +84,10 @@ const Store = {
     audioContext: {},
     retryCount: 0,
     lastFetchTime: 0,
-    isOnline: true
+    isOnline: true,
+    evacuationLayer: null,
+    favoriteZones: [],
+    favoriteMarkersLayer: null
 };
 
 const ICONS = {

@@ -1,5 +1,5 @@
-const CACHE_NAME = 'mapa-sismico-v2';
-const STATIC_CACHE = 'static-v2';
+const CACHE_NAME = 'mapa-sismico-v3';
+const STATIC_CACHE = 'static-v3';
 const TILES_CACHE = 'tiles-v1';
 const API_CACHE = 'api-v1';
 

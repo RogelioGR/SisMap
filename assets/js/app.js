@@ -271,6 +271,100 @@ const MapService = {
             Store.shakeMapOverlay = null;
             Utils.showToast('ShakeMap oculto');
         }
+    },
+
+    /* CAPA DE RUTAS DE EVACUACIÓN (OpenStreetMap route=evacuation, vía Overpass) */
+    toggleEvacuationRoutes: async function() {
+        if (!MapService.instance) return;
+        if (Store.evacuationLayer) {
+            MapService.instance.removeLayer(Store.evacuationLayer);
+            Store.evacuationLayer = null;
+            document.getElementById('btn-evac')?.classList.remove('active');
+            return;
+        }
+        document.getElementById('btn-evac')?.classList.add('active');
+        await MapService.loadEvacuationRoutes();
+    },
+
+    loadEvacuationRoutes: async function() {
+        const map = MapService.instance;
+        const center = map.getCenter();
+        const radiusM = Config.EVACUATION.SEARCH_RADIUS_KM * 1000;
+        Utils.showToast('Buscando rutas de evacuación cercanas…');
+
+        const query = `[out:json][timeout:25];relation["route"="evacuation"](around:${radiusM},${center.lat},${center.lng});out geom;`;
+
+        try {
+            const res = await fetch(Config.EVACUATION.OVERPASS_URL, {
+                method: 'POST',
+                body: 'data=' + encodeURIComponent(query)
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const relations = (data.elements || []).filter(el => el.type === 'relation');
+
+            if (relations.length === 0) {
+                Utils.showToast('No hay rutas de evacuación mapeadas cerca de aquí (cobertura limitada en OpenStreetMap)');
+                document.getElementById('btn-evac')?.classList.remove('active');
+                Store.evacuationLayer = null;
+                return;
+            }
+
+            const group = L.layerGroup();
+            relations.forEach(rel => {
+                const type = rel.tags?.evacuation_route || 'default';
+                const color = Config.EVACUATION.COLORS[type] || Config.EVACUATION.COLORS.default;
+                const name = rel.tags?.name || rel.tags?.ref || 'Ruta de evacuación';
+
+                (rel.members || []).forEach(member => {
+                    if (member.type !== 'way' || !member.geometry) return;
+                    const latlngs = member.geometry.map(pt => [pt.lat, pt.lon]);
+                    if (latlngs.length < 2) return;
+                    const line = L.polyline(latlngs, {
+                        color,
+                        weight: 4,
+                        opacity: 0.85,
+                        dashArray: '10, 8'
+                    });
+                    line.bindPopup(`<strong>${name}</strong><br>Tipo: ${type}`);
+                    group.addLayer(line);
+                });
+            });
+
+            group.addTo(map);
+            Store.evacuationLayer = group;
+            Utils.showToast(`${relations.length} ruta(s) de evacuación encontrada(s)`);
+        } catch (err) {
+            console.error('[Evacuación] Error:', err);
+            Utils.showToast('No se pudieron cargar las rutas de evacuación');
+            document.getElementById('btn-evac')?.classList.remove('active');
+            Store.evacuationLayer = null;
+        }
+    },
+
+    /* BÚSQUEDA DE CIUDADES (Nominatim / OpenStreetMap, gratis, sin API key) */
+    searchCity: async function(query) {
+        if (!query || !query.trim()) return null;
+        Utils.showToast('Buscando ciudad…');
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query.trim())}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const results = await res.json();
+            if (!results.length) {
+                Utils.showToast(`No se encontró "${query}"`);
+                return null;
+            }
+            const { lat, lon, display_name } = results[0];
+            const coords = { lat: parseFloat(lat), lng: parseFloat(lon), name: display_name.split(',')[0] };
+            if (MapService.instance) {
+                MapService.instance.flyTo([coords.lat, coords.lng], 9, { animate: true, duration: 1.5 });
+            }
+            return coords;
+        } catch (err) {
+            console.error('[MapService] Error de geocodificación:', err);
+            Utils.showToast('Error al buscar la ciudad');
+            return null;
+        }
     }
 };
 
@@ -466,6 +560,28 @@ const SpinnerService = {
 
 /* SERVICIO DE DATOS */
 const DataService = {
+    /* Pinta lo que haya en caché de inmediato (oculta el loader al instante) mientras fetchQuakes trae datos frescos en paralelo */
+    loadCachedFirst: async () => {
+        try {
+            const cached = await DBService.getQuakes();
+            if (!cached.length || Store.quakes.length) return; // no pisar datos ya cargados por un fetch más rápido
+            const sorted = cached.sort((a, b) => b.time - a.time).slice(0, 100);
+            if (Store.userLocation) {
+                sorted.forEach(eq => {
+                    eq.distance = Utils.calcDistance(Store.userLocation.lat, Store.userLocation.lng, eq.lat, eq.lng);
+                });
+            }
+            Store.quakes = sorted;
+            Store.knownIds = {};
+            sorted.forEach(q => Store.knownIds[q.id] = true);
+            UIService.refreshView();
+            SpinnerService.hide();
+            Utils.showToast('Mostrando datos guardados mientras se actualiza…');
+        } catch (err) {
+            console.warn('[DataService] No se pudo precargar caché:', err);
+        }
+    },
+
     fetchWithRetry: async (url, retries = Config.MAX_RETRY_ATTEMPTS, delay = Config.RETRY_DELAY) => {
         for (let i = 0; i < retries; i++) {
             try {
@@ -521,6 +637,7 @@ const DataService = {
             Store.lastFetchTime = Date.now();
             UIService.refreshView();
             if (Store.userLocation) LocationService.checkNearby();
+            FavoritesService.checkNearby();
             Utils.showToast(`${newQuakes.length} terremotos cargados`);
             Store.retryCount = 0;
         } catch (error) {
@@ -685,6 +802,137 @@ const AlertService = {
             banner.removeAttribute('aria-live');
         }
         AlertService.stopAll();
+    }
+};
+
+/* SERVICIO DE ZONAS FAVORITAS (multi-ubicación) */
+const FavoritesService = {
+    load: async () => {
+        try {
+            const saved = await DBService.getSetting('favoriteZones');
+            Store.favoriteZones = Array.isArray(saved) ? saved : [];
+        } catch (err) {
+            console.warn('[FavoritesService] Error al cargar:', err);
+            Store.favoriteZones = [];
+        }
+        FavoritesService.render();
+    },
+
+    persist: async () => {
+        try {
+            await DBService.saveSetting('favoriteZones', Store.favoriteZones);
+        } catch (err) {
+            console.warn('[FavoritesService] Error al guardar:', err);
+            Utils.showToast('No se pudo guardar la zona favorita');
+        }
+    },
+
+    add: async (name, lat, lng) => {
+        const zone = { id: `z_${Date.now()}`, name, lat, lng };
+        Store.favoriteZones.push(zone);
+        await FavoritesService.persist();
+        FavoritesService.render();
+        Utils.showToast(`"${name}" agregada a zonas favoritas`);
+    },
+
+    remove: async (id) => {
+        const zone = Store.favoriteZones.find(z => z.id === id);
+        Store.favoriteZones = Store.favoriteZones.filter(z => z.id !== id);
+        await FavoritesService.persist();
+        FavoritesService.render();
+        if (zone) Utils.showToast(`"${zone.name}" eliminada`);
+    },
+
+    flyTo: (id) => {
+        const zone = Store.favoriteZones.find(z => z.id === id);
+        if (!zone || !MapService.instance) return;
+        MapService.instance.flyTo([zone.lat, zone.lng], 9, { animate: true, duration: 1.5 });
+        SettingsService.close();
+    },
+
+    searchAndAdd: async () => {
+        const nameInput = document.getElementById('fav-search-name');
+        const cityInput = document.getElementById('fav-search-city');
+        const name = nameInput?.value.trim();
+        const city = cityInput?.value.trim();
+        if (!city) {
+            Utils.showToast('Escribe una ciudad para buscar');
+            return;
+        }
+        const coords = await MapService.searchCity(city);
+        if (!coords) return;
+        await FavoritesService.add(name || coords.name, coords.lat, coords.lng);
+        if (nameInput) nameInput.value = '';
+        if (cityInput) cityInput.value = '';
+    },
+
+    render: () => {
+        const list = document.getElementById('fav-zones-list');
+        if (list) {
+            if (Store.favoriteZones.length === 0) {
+                list.innerHTML = '<p class="fav-empty">Sin zonas guardadas todavía.</p>';
+            } else {
+                list.innerHTML = Store.favoriteZones.map(z => `
+                    <div class="fav-zone-row">
+                        <button class="fav-zone-name" onclick="FavoritesService.flyTo('${z.id}')" title="Ir al mapa">
+                            <i class="fa-solid fa-location-dot" aria-hidden="true"></i> ${z.name}
+                        </button>
+                        <button class="fav-zone-remove" onclick="FavoritesService.remove('${z.id}')" aria-label="Eliminar ${z.name}">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                `).join('');
+            }
+        }
+        FavoritesService.renderMapMarkers();
+    },
+
+    /* Pin distintivo (estrella) en el mapa para cada zona guardada, para diferenciarla de sismos y de tu ubicación GPS */
+    renderMapMarkers: () => {
+        if (!MapService.instance) return;
+        if (!Store.favoriteMarkersLayer) {
+            Store.favoriteMarkersLayer = L.layerGroup().addTo(MapService.instance);
+        }
+        Store.favoriteMarkersLayer.clearLayers();
+        Store.favoriteZones.forEach(zone => {
+            const marker = L.marker([zone.lat, zone.lng], {
+                icon: L.divIcon({
+                    className: '',
+                    html: `<div class="fav-marker"><i class="fa-solid fa-star" aria-hidden="true"></i></div>`,
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 30],
+                    popupAnchor: [0, -28]
+                })
+            });
+            marker.bindPopup(`
+                <strong>${zone.name}</strong><br>
+                <span style="font-size:12px;color:var(--muted)">Zona favorita</span><br>
+                <button class="eq-popup-link eq-popup-action" onclick="FavoritesService.remove('${zone.id}')">
+                    <i class="fa-solid fa-trash" aria-hidden="true"></i> Quitar de favoritas
+                </button>
+            `);
+            Store.favoriteMarkersLayer.addLayer(marker);
+        });
+    },
+
+    /* Evalúa sismos cercanos a cada zona favorita, independiente del GPS */
+    checkNearby: () => {
+        if (!Store.favoriteZones.length) return;
+        Store.favoriteZones.forEach((zone, idx) => {
+            const nearby = Store.quakes.filter(eq => {
+                const d = Utils.calcDistance(zone.lat, zone.lng, eq.lat, eq.lng);
+                return d <= Config.NEARBY_RADIUS_KM && eq.mag >= Config.ALERT.NEARBY_MIN_MAG;
+            });
+            if (nearby.length === 0) return;
+            nearby.sort((a, b) => b.mag - a.mag);
+            const strongest = nearby[0];
+            const key = `${zone.id}:${strongest.id}`;
+            if (Store.notifiedNearby[key]) return;
+            Store.notifiedNearby[key] = true;
+            const dist = Utils.calcDistance(zone.lat, zone.lng, strongest.lat, strongest.lng);
+            const eqForAlert = { ...strongest, distance: dist, place: `${strongest.place} (cerca de ${zone.name})` };
+            setTimeout(() => AlertService.show(eqForAlert, false, true), 1500 + idx * 9000);
+        });
     }
 };
 
@@ -1002,10 +1250,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     UIService.initDelegation();
     AlertService.init();
     ConnectionService.init();
-    await SettingsService.load().catch(err => console.warn('[Settings] Error:', err));
+
+    // Failsafe: si algo en la carga se cuelga (ej. IndexedDB lento/bloqueado), no dejar el loader pegado para siempre
+    setTimeout(() => {
+        if (!SpinnerService.hidden) {
+            SpinnerService.hide();
+            Utils.showToast('La carga está tardando más de lo normal. Revisa tu conexión.');
+        }
+    }, 12000);
+
+    // Ajustes y favoritos se cargan en paralelo, sin bloquear la carga de sismos (que es lo que oculta el loader)
+    SettingsService.load().catch(err => console.warn('[Settings] Error:', err));
+    FavoritesService.load().catch(err => console.warn('[Favorites] Error:', err));
+
     if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
     }
+    DataService.loadCachedFirst();
     DataService.fetchQuakes();
     DataService.startAutoRefresh();
     DataService.fetchActiveTsunamiAlerts(); 

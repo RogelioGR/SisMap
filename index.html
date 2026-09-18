@@ -35,6 +35,7 @@
             <div id="map-ctrl">
                 <button class="btn-icon ctrl ac" onclick="MapService.instance.zoomIn()" title="Acercar"><i class="fa-solid fa-plus"></i></button>
                 <button class="btn-icon ctrl ac" onclick="MapService.instance.zoomOut()" title="Alejar"><i class="fa-solid fa-minus"></i></button>
+                <button class="btn-icon ctrl ac" id="btn-evac" onclick="MapService.toggleEvacuationRoutes()" title="Rutas de evacuación" aria-label="Alternar rutas de evacuación"><i class="fa-solid fa-person-running"></i></button>
             </div>
 
             <div id="bottom-sheet" class="bottom-sheet collapsed">
@@ -142,6 +143,19 @@
                         <input type="checkbox" id="set-sound" onchange="SettingsService.save({ soundEnabled: this.checked })">
                         <span class="set-switch-track"></span>
                     </label>
+                </div>
+
+                <div class="set-group set-group-favorites">
+                    <label class="set-label">Zonas favoritas</label>
+                    <div id="fav-zones-list" class="fav-zones-list"></div>
+                    <div class="fav-add-row">
+                        <input type="text" id="fav-search-name" class="set-control" placeholder="Nombre (ej. Casa de mis papás)">
+                        <input type="text" id="fav-search-city" class="set-control" placeholder="Ciudad a buscar (ej. Guadalajara, MX)">
+                        <button class="fav-add-btn" onclick="FavoritesService.searchAndAdd()">
+                            <i class="fa-solid fa-plus" aria-hidden="true"></i> Agregar zona
+                        </button>
+                    </div>
+                    <p class="fav-hint">Las alertas de sismo cercano se evaluarán también contra cada zona guardada, además de tu ubicación GPS.</p>
                 </div>
             </div>
         </div>
