@@ -1,16 +1,19 @@
 const ENV = {
     CARTO_API_KEY: 'cb1_2xn4_1_038a5c68ca6fbbb0ca36839f',
-    USGS_API_URL: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson'
+    USGS_API_URL: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson',
+    EMSC_API_URL: 'https://www.seismicportal.eu/fdsnws/event/1/query?format=json&limit=50',
+    WEATHER_API: 'https://api.open-meteo.com/v1/forecast'
 };
 
 const Config = {
     API_URL: ENV.USGS_API_URL,
+    API_URL_2: ENV.EMSC_API_URL,
+    WEATHER_API: ENV.WEATHER_API,
     REFRESH_INTERVAL: 60,
     NEARBY_RADIUS_KM: 1500,
     MAX_RETRY_ATTEMPTS: 3,
     RETRY_DELAY: 1000,
 
-    // Ajustables desde el panel de configuración (valores por defecto)
     ALERT: {
         HIGH_THRESHOLD: 5.9,
         NEARBY_MIN_MAG: 3.0
@@ -61,7 +64,7 @@ const Store = {
     isFirstLoad: true,
     userMarker: null,
     userAccuracyCircle: null,
-    shakeMapOverlay: null, // Agregado para ShakeMap
+    shakeMapOverlay: null, 
     timers: {
         refresh: null,
         toast: null,

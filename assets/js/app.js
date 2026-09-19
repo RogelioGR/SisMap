@@ -23,15 +23,24 @@ const Utils = {
     normalizeQuake: (feature) => {
         const props = feature.properties;
         const coords = feature.geometry.coordinates;
+        
+        let timestamp = props.time;
+        if (typeof timestamp === 'string') {
+            timestamp = new Date(timestamp).getTime();
+        }
+        
         const mag = props.mag || 0;
-        const depth = coords[2] || 0;
+        const depth = coords[2] || (props.depth || 0);
         const colorKey = Utils.getColorKey(mag);
+        
+        const place = props.place || props.flynn_region || 'Ubicación desconocida';
+        
         return {
-            id: feature.id,
+            id: feature.id || props.unid,
             mag: mag,
-            place: props.place || 'Ubicación desconocida',
-            time: props.time,
-            url: props.url,
+            place: place,
+            time: timestamp,
+            url: props.url || `https://www.emsc-csem.org/Earthquake/earthquake.php?id=${feature.id}`,
             lng: coords[0],
             lat: coords[1],
             depth: depth,
@@ -40,9 +49,9 @@ const Utils = {
             color: Utils.getColor(colorKey),
             label: mag.toFixed(1),
             isHigh: mag >= Config.ALERT.HIGH_THRESHOLD,
-            timeStr: Utils.formatDate(props.time),
-            types: props.types || '',       //  Agregado para ShakeMap
-            detailUrl: props.detail || '',  // Agregado para ShakeMap
+            timeStr: Utils.formatDate(timestamp),
+            types: props.types || '',
+            detailUrl: props.detail || '',
             distance: null
         };
     },
@@ -273,7 +282,6 @@ const MapService = {
         }
     },
 
-    /* BÚSQUEDA DE CIUDADES (Nominatim / OpenStreetMap, gratis, sin API key) */
     searchCity: async function(query) {
         if (!query || !query.trim()) return null;
         Utils.showToast('Buscando ciudad…');
@@ -298,23 +306,19 @@ const MapService = {
         }
     },
 
-    /* BÚSQUEDA POR DIRECCIÓN COMPLETA con reintentos progresivos (Nominatim).
-       Ej: "Emiliano Zapata 21, Centro, 39000 Chilpancingo de los Bravo, Gro."
-       Devuelve [{ lat, lng, label, precise }] */
     searchAddress: async function(query) {
         const raw = (query || '').trim();
         if (!raw) return [];
         const parts = raw.split(',').map(p => p.trim()).filter(Boolean);
         const stripNum = s => s.replace(/\s*(#|no\.?|núm\.?|num\.?)?\s*\d+\s*[a-z]?$/i, '').trim();
 
-        // De la más específica a la más general
         const attempts = [{ q: raw, precise: true }];
-        if (parts.length > 2) attempts.push({ q: [parts[0], ...parts.slice(2)].join(', '), precise: true }); // sin colonia
+        if (parts.length > 2) attempts.push({ q: [parts[0], ...parts.slice(2)].join(', '), precise: true });
         const street = stripNum(parts[0]);
         if (parts.length > 1 && street && street !== parts[0]) {
-            attempts.push({ q: [street, ...parts.slice(2)].join(', '), precise: false });                   // calle sin número
+            attempts.push({ q: [street, ...parts.slice(2)].join(', '), precise: false });
         }
-        attempts.push({ q: parts.slice(parts.length > 2 ? 2 : 1).join(', '), precise: false });               // CP + ciudad
+        attempts.push({ q: parts.slice(parts.length > 2 ? 2 : 1).join(', '), precise: false });
 
         Utils.showToast('Buscando dirección…');
         const seen = new Set();
@@ -323,7 +327,7 @@ const MapService = {
             for (const a of attempts) {
                 if (!a.q || seen.has(a.q)) continue;
                 seen.add(a.q);
-                if (!first) await new Promise(r => setTimeout(r, 1100)); // Nominatim: máx. 1 petición/seg
+                if (!first) await new Promise(r => setTimeout(r, 1100));
                 first = false;
                 const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&accept-language=es&q=${encodeURIComponent(a.q)}`;
                 const res = await fetch(url);
@@ -388,7 +392,8 @@ const UIService = {
         });
     },
     shareQuake: (eq) => {
-const text = `[SISMAP] Sismo M${eq.label} registrado en:\nUbicación: ${eq.place}\nProfundidad: ${eq.depth.toFixed(0)} km\nMás info: ${eq.url || 'SisMap'}`;        if (navigator.share) {
+        const text = `[SISMAP] Sismo M${eq.label} registrado en:\nUbicación: ${eq.place}\nProfundidad: ${eq.depth.toFixed(0)} km\nMás info: ${eq.url || 'SisMap'}`;
+        if (navigator.share) {
             navigator.share({ title: `Sismo M${eq.label} - SisMap`, text: text }).catch(() => {});
         } else {
             navigator.clipboard.writeText(text).then(() => {
@@ -442,7 +447,7 @@ const text = `[SISMAP] Sismo M${eq.label} registrado en:\nUbicación: ${eq.place
                         <div class="eq-popup-sub">${depthLbl}</div>
                     </div>
                 </div>
-                ${eq.url ? `<a href="${eq.url}" target="_blank" rel="noopener noreferrer" class="eq-popup-link">Ver en USGS</a>` : ''}
+                ${eq.url ? `<a href="${eq.url}" target="_blank" rel="noopener noreferrer" class="eq-popup-link">Ver detalles oficiales</a>` : ''}
                 ${shareBtn}
                 ${shakeMapBtn}
                 ${tsAlert}
@@ -539,11 +544,10 @@ const SpinnerService = {
 
 /* SERVICIO DE DATOS */
 const DataService = {
-    /* Pinta lo que haya en caché de inmediato (oculta el loader al instante) mientras fetchQuakes trae datos frescos en paralelo */
     loadCachedFirst: async () => {
         try {
             const cached = await DBService.getQuakes();
-            if (!cached.length || Store.quakes.length) return; // no pisar datos ya cargados por un fetch más rápido
+            if (!cached.length || Store.quakes.length) return;
             const sorted = cached.sort((a, b) => b.time - a.time).slice(0, 100);
             if (Store.userLocation) {
                 sorted.forEach(eq => {
@@ -585,16 +589,41 @@ const DataService = {
     },
     fetchQuakes: async () => {
         try {
-            const data = await DataService.fetchWithRetry(Config.API_URL);
-            const newQuakes = data.features
-                .sort((a, b) => b.properties.time - a.properties.time)
-                .slice(0, 100)
-                .map(Utils.normalizeQuake);
+            // Se piden los datos a ambas APIs (USGS y EMSC) en paralelo
+            const [res1, res2] = await Promise.allSettled([
+                DataService.fetchWithRetry(Config.API_URL),
+                DataService.fetchWithRetry(Config.API_URL_2)
+            ]);
+
+            let features = [];
+            
+            if (res1.status === 'fulfilled' && res1.value.features) {
+                features = features.concat(res1.value.features);
+            }
+            if (res2.status === 'fulfilled' && res2.value.features) {
+                features = features.concat(res2.value.features);
+            }
+
+            // Normaliza y elimina duplicados, guardando en un Map
+            const uniqueQuakes = new Map();
+            features.forEach(f => {
+                const normalized = Utils.normalizeQuake(f);
+                if (!uniqueQuakes.has(normalized.id)) {
+                    uniqueQuakes.set(normalized.id, normalized);
+                }
+            });
+
+            // Convertimos a array, ordenamos por tiempo más reciente y limitamos a 150 sismos
+            const newQuakes = Array.from(uniqueQuakes.values())
+                .sort((a, b) => b.time - a.time)
+                .slice(0, 150);
+                
             if (Store.userLocation) {
                 newQuakes.forEach(eq => {
                     eq.distance = Utils.calcDistance(Store.userLocation.lat, Store.userLocation.lng, eq.lat, eq.lng);
                 });
             }
+            
             const changed = newQuakes.length !== Store.quakes.length || newQuakes[0]?.id !== Store.quakes[0]?.id;
             if (changed) {
                 await DBService.saveQuakes(newQuakes).catch(err => {
@@ -668,7 +697,6 @@ const DataService = {
         };
         Store.timers.refresh = setInterval(updateCountdown, 1000);
     },
-    /* alertas de tsunami */
     fetchActiveTsunamiAlerts: async () => {
         try {
             const res = await fetch('https://api.weather.gov/alerts/active?event=Tsunami%20Warning,Tsunami%20Watch,Tsunami%20Advisory');
@@ -713,10 +741,13 @@ const AlertService = {
             action: (eq) => TsunamiService.show(eq.id), notify: 'ALERTA TSUNAMI'
         },
         nearby: {
-            class: 'eq-alert', eyebrow: 'TERREMOTO CERCANO',
+            class: 'eq-alert', 
+            // Dinámico: muestra el nombre de la zona favorita si existe, o "(GPS)"
+            eyebrow: (eq) => eq.zoneName ? `CERCA DE: ${eq.zoneName.toUpperCase()}` : 'TERREMOTO CERCA (GPS)',
             title: (eq) => `M ${eq.label} a ${Utils.formatDistance(eq.distance)}`, sound: 'NEARBY',
             duration: 0, detail: 'Ver en mapa →',
-            action: (eq) => UIService.flyToQuake(eq), notify: 'Sismo Cercano'
+            action: (eq) => UIService.flyToQuake(eq), 
+            notify: (eq) => eq.zoneName ? `Sismo cerca de ${eq.zoneName}` : 'Sismo Cercano'
         },
         high: {
             class: 'eq-alert', eyebrow: 'SISMO DE ALTA MAGNITUD',
@@ -752,13 +783,17 @@ const AlertService = {
         banner.className = `${cfg.class} show`;
         banner.setAttribute('role', 'alert');
         banner.setAttribute('aria-live', 'assertive');
+        
         document.getElementById('ab-icon-wrap').innerHTML = isTsunami ? ICONS.tsunami : ICONS.earthquake;
-        document.getElementById('ab-eyebrow').textContent = cfg.eyebrow;
+        
+        document.getElementById('ab-eyebrow').textContent = typeof cfg.eyebrow === 'function' ? cfg.eyebrow(eq) : cfg.eyebrow;
         document.getElementById('ab-title').textContent = typeof cfg.title === 'function' ? cfg.title(eq) : cfg.title;
         document.getElementById('ab-msg').textContent = `${eq.place} · Prof. ${eq.depth.toFixed(0)} km`;
+        
         const detEl = document.getElementById('ab-detail');
         detEl.textContent = cfg.detail;
         detEl.onclick = () => { cfg.action(eq); AlertService.hide(); };
+        
         const progress = document.getElementById('ab-progress');
         if (progress) {
             progress.style.animation = 'none';
@@ -768,8 +803,10 @@ const AlertService = {
         clearTimeout(Store.timers.alert);
         Store.timers.alert = setTimeout(() => AlertService.hide(), 8000);
         AlertService.play(cfg.sound, false, cfg.duration || 8000);
+        
         if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification(cfg.notify, { body: eq.place, icon: './assets/iconoApp.png', requireInteraction: true });
+            const notifyText = typeof cfg.notify === 'function' ? cfg.notify(eq) : cfg.notify;
+            new Notification(notifyText, { body: eq.place, icon: './assets/iconoApp.png', requireInteraction: true });
         }
         Utils.announceToScreenReader(isTsunami ? 'Alerta de tsunami' : `Sismo magnitud ${eq.label} en ${eq.place}`);
     },
@@ -784,140 +821,7 @@ const AlertService = {
     }
 };
 
-/* SERVICIO DE NUBE (Supabase) — opcional: sin credenciales o sin sesión, la app sigue 100% local */
-const CloudService = {
-    client: null,
-    user: null,
-
-    enabled: () => !!(Config.SUPABASE.URL && Config.SUPABASE.ANON_KEY && window.supabase),
-
-    init: async () => {
-        if (!CloudService.enabled()) {
-            CloudService.renderAccount();
-            return;
-        }
-        CloudService.client = window.supabase.createClient(Config.SUPABASE.URL, Config.SUPABASE.ANON_KEY);
-        CloudService.client.auth.onAuthStateChange((_event, session) => {
-            const prevId = CloudService.user?.id;
-            CloudService.user = session?.user || null;
-            CloudService.renderAccount();
-            // Fuera del callback para no bloquear el cliente de auth
-            if (CloudService.user && CloudService.user.id !== prevId) {
-                setTimeout(() => FavoritesService.sync(), 0);
-            }
-        });
-    },
-
-    mode: 'login', // 'login' | 'signup'
-    busy: false,
-
-    setMode: (mode) => {
-        const email = document.getElementById('cloud-email')?.value || '';
-        CloudService.mode = mode;
-        CloudService.renderAccount();
-        const el = document.getElementById('cloud-email');
-        if (el) el.value = email;
-    },
-
-    _errorMsg: (err) => {
-        const m = (err?.message || '').toLowerCase();
-        if (m.includes('invalid login')) return 'Correo o contraseña incorrectos';
-        if (m.includes('not confirmed')) return 'Confirma tu correo antes de iniciar sesión';
-        if (m.includes('already registered')) return 'Ese correo ya está registrado';
-        if (m.includes('rate limit') || m.includes('security purposes')) return 'Demasiados intentos, espera un minuto';
-        if (m.includes('database error')) return 'Error del servidor al crear la cuenta';
-        if (m.includes('password')) return 'Contraseña no válida (mínimo 8 caracteres)';
-        return 'No se pudo completar la acción';
-    },
-
-    submit: async () => {
-        if (CloudService.busy || !CloudService.client) return;
-        const email = document.getElementById('cloud-email')?.value.trim();
-        const password = document.getElementById('cloud-password')?.value || '';
-        const isSignup = CloudService.mode === 'signup';
-
-        if (!email || !/^\S+@\S+\.\S+$/.test(email)) { Utils.showToast('Escribe un correo válido'); return; }
-        if (password.length < 8) { Utils.showToast('La contraseña debe tener al menos 8 caracteres'); return; }
-        if (isSignup && password !== document.getElementById('cloud-password2')?.value) {
-            Utils.showToast('Las contraseñas no coinciden');
-            return;
-        }
-
-        CloudService.busy = true;
-        const btn = document.getElementById('cloud-submit');
-        if (btn) btn.disabled = true;
-        try {
-            if (isSignup) {
-                const { data, error } = await CloudService.client.auth.signUp({
-                    email,
-                    password,
-                    options: { emailRedirectTo: window.location.origin + window.location.pathname }
-                });
-                if (error) throw error;
-                if (data.user && data.user.identities && data.user.identities.length === 0) {
-                    Utils.showToast('Ese correo ya está registrado');
-                } else if (!data.session) {
-                    Utils.showToast('Cuenta creada. Revisa tu correo para confirmarla', 6000);
-                } else {
-                    Utils.showToast('Cuenta creada');
-                }
-            } else {
-                const { error } = await CloudService.client.auth.signInWithPassword({ email, password });
-                if (error) throw error;
-                Utils.showToast('Sesión iniciada');
-            }
-        } catch (err) {
-            console.warn('[Cloud] auth:', err?.message);
-            Utils.showToast(CloudService._errorMsg(err), 4000);
-        } finally {
-            CloudService.busy = false;
-            const b = document.getElementById('cloud-submit');
-            if (b) b.disabled = false;
-        }
-    },
-
-    signOut: async () => {
-        await CloudService.client.auth.signOut();
-        Utils.showToast('Sesión cerrada');
-    },
-
-    renderAccount: () => {
-        const group = document.getElementById('cloud-group');
-        const box = document.getElementById('cloud-account');
-        if (!group || !box) return;
-        if (!CloudService.enabled()) { group.style.display = 'none'; return; }
-        group.style.display = '';
-        if (CloudService.user) {
-            box.innerHTML = `
-                <div class="fav-zone-row">
-                    <span class="fav-zone-name"><i class="fa-solid fa-cloud" aria-hidden="true"></i> ${FavoritesService.esc(CloudService.user.email)}</span>
-                    <button class="fav-add-btn" onclick="CloudService.signOut()">Cerrar sesión</button>
-                </div>
-                <p class="fav-hint">Tus zonas favoritas se sincronizan con tu cuenta.</p>`;
-        } else {
-            const signup = CloudService.mode === 'signup';
-            box.innerHTML = `
-                <div class="cloud-tabs" role="tablist">
-                    <button type="button" class="cloud-tab ${signup ? '' : 'active'}" role="tab" aria-selected="${!signup}" onclick="CloudService.setMode('login')">Iniciar sesión</button>
-                    <button type="button" class="cloud-tab ${signup ? 'active' : ''}" role="tab" aria-selected="${signup}" onclick="CloudService.setMode('signup')">Registrarse</button>
-                </div>
-                <div class="cloud-form">
-                    <input type="email" id="cloud-email" class="set-control" placeholder="Correo electrónico" autocomplete="email">
-                    <input type="password" id="cloud-password" class="set-control" placeholder="Contraseña (mín. 8 caracteres)"
-                           autocomplete="${signup ? 'new-password' : 'current-password'}"
-                           onkeydown="if(event.key==='Enter'){CloudService.submit()}">
-                    ${signup ? `<input type="password" id="cloud-password2" class="set-control" placeholder="Repite la contraseña" autocomplete="new-password"
-                           onkeydown="if(event.key==='Enter'){CloudService.submit()}">` : ''}
-                    <button type="button" id="cloud-submit" class="fav-add-btn" onclick="CloudService.submit()">
-                        <i class="fa-solid ${signup ? 'fa-user-plus' : 'fa-right-to-bracket'}" aria-hidden="true"></i> ${signup ? 'Crear cuenta' : 'Entrar'}
-                    </button>
-                </div>
-                <p class="fav-hint">Con una cuenta, tus zonas favoritas se sincronizan entre dispositivos. Sin cuenta se guardan solo en este dispositivo.</p>`;
-        }
-    }
-};
-
-/* SERVICIO DE ZONAS FAVORITAS (multi-ubicación) */
+/* SERVICIO DE ZONAS FAVORITAS (local) */
 const FavoritesService = {
     load: async () => {
         try {
@@ -950,7 +854,6 @@ const FavoritesService = {
         await FavoritesService.persist();
         FavoritesService.render();
         Utils.showToast(`"${name}" agregada a zonas favoritas`);
-        FavoritesService.cloudUpsert([zone]);
         return zone;
     },
 
@@ -960,7 +863,6 @@ const FavoritesService = {
         await FavoritesService.persist();
         FavoritesService.render();
         if (zone) Utils.showToast(`"${zone.name}" eliminada`);
-        FavoritesService.cloudDelete(id);
     },
 
     flyTo: (id) => {
@@ -984,7 +886,6 @@ const FavoritesService = {
         }
         FavoritesService.pending = results;
         FavoritesService.pendingQuery = query;
-        // Un solo resultado exacto: se guarda directo. Si no, el usuario elige.
         if (results.length === 1 && results[0].precise) {
             await FavoritesService.pick(0);
         } else {
@@ -1028,62 +929,6 @@ const FavoritesService = {
             return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
         })),
 
-    cloudUpsert: async (zones) => {
-        if (!CloudService.user || !CloudService.client || !zones.length) return false;
-        const rows = zones.map(z => ({
-            id: z.id,
-            user_id: CloudService.user.id,
-            name: z.name,
-            address: z.address || null,
-            lat: z.lat,
-            lng: z.lng,
-            precise: !!z.precise
-        }));
-        const { error } = await CloudService.client.from('favorite_zones').upsert(rows);
-        if (error) {
-            console.warn('[Cloud] upsert:', error.message);
-            Utils.showToast('No se pudo sincronizar con la nube');
-            return false; // quedan con synced:false y se reintentan en la próxima sincronización
-        }
-        zones.forEach(z => { z.synced = true; });
-        await FavoritesService.persist();
-        return true;
-    },
-
-    cloudDelete: async (id) => {
-        if (!CloudService.user || !CloudService.client) return;
-        const { error } = await CloudService.client.from('favorite_zones').delete().eq('id', id);
-        if (error) console.warn('[Cloud] delete:', error.message);
-    },
-
-    /* La nube es la fuente de verdad para zonas ya sincronizadas; las locales nuevas (synced:false) se suben. */
-    sync: async () => {
-        if (!CloudService.user || !CloudService.client) return;
-        const isUuid = v => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
-        // Migra ids antiguos (z_123...) al formato uuid que exige la tabla
-        Store.favoriteZones.forEach(z => { if (!isUuid(z.id)) { z.id = FavoritesService.uuid(); z.synced = false; } });
-
-        const { data, error } = await CloudService.client.from('favorite_zones').select('*').order('created_at');
-        if (error) {
-            console.warn('[Cloud] select:', error.message);
-            Utils.showToast('No se pudo leer tus zonas de la nube');
-            return;
-        }
-        const cloudIds = new Set(data.map(r => r.id));
-        // Ya sincronizadas pero ausentes en la nube = borradas desde otro dispositivo
-        Store.favoriteZones = Store.favoriteZones.filter(z => !z.synced || cloudIds.has(z.id));
-        const localIds = new Set(Store.favoriteZones.map(z => z.id));
-        const fromCloud = data
-            .filter(r => !localIds.has(r.id))
-            .map(r => ({ id: r.id, name: r.name, address: r.address || '', lat: r.lat, lng: r.lng, precise: !!r.precise, synced: true }));
-        Store.favoriteZones.push(...fromCloud);
-        const toUpload = Store.favoriteZones.filter(z => !z.synced);
-        await FavoritesService.persist();
-        await FavoritesService.cloudUpsert(toUpload);
-        FavoritesService.render();
-        Utils.showToast('Zonas sincronizadas');
-    },
-
     render: () => {
         const list = document.getElementById('fav-zones-list');
         if (list) {
@@ -1109,7 +954,6 @@ const FavoritesService = {
         FavoritesService.renderMapMarkers();
     },
 
-    /* Pin distintivo (estrella) en el mapa para cada zona guardada, para diferenciarla de sismos y de tu ubicación GPS */
     renderMapMarkers: () => {
         if (!MapService.instance) return;
         if (!Store.favoriteMarkersLayer) {
@@ -1137,7 +981,6 @@ const FavoritesService = {
         });
     },
 
-    /* Evalúa sismos cercanos a cada zona favorita, independiente del GPS */
     checkNearby: () => {
         if (!Store.favoriteZones.length) return;
         Store.favoriteZones.forEach((zone, idx) => {
@@ -1152,7 +995,10 @@ const FavoritesService = {
             if (Store.notifiedNearby[key]) return;
             Store.notifiedNearby[key] = true;
             const dist = Utils.calcDistance(zone.lat, zone.lng, strongest.lat, strongest.lng);
-            const eqForAlert = { ...strongest, distance: dist, place: `${strongest.place} (cerca de ${zone.name})` };
+            
+            // Pasamos el nombre de la zona a la alerta
+            const eqForAlert = { ...strongest, distance: dist, zoneName: zone.name };
+            
             setTimeout(() => AlertService.show(eqForAlert, false, true), 1500 + idx * 9000);
         });
     }
@@ -1165,6 +1011,139 @@ const GEO_ERRORS = {
     0: 'Error desconocido de ubicación'
 };
 
+/* SERVICIO DE CLIMA */
+/* SERVICIO DE CLIMA */
+const WeatherService = {
+    currentData: null,
+    dailyData: null, // Guardará el pronóstico de la semana
+    
+    // Diccionario de la Organización Meteorológica Mundial (WMO) en español
+    weatherCodes: {
+        0: 'Cielo despejado', 1: 'Mayormente despejado', 2: 'Parcialmente nublado', 3: 'Nublado',
+        45: 'Niebla', 48: 'Niebla escarchada', 51: 'Llovizna ligera', 53: 'Llovizna moderada', 55: 'Llovizna densa',
+        61: 'Lluvia ligera', 63: 'Lluvia moderada', 65: 'Lluvia fuerte', 71: 'Nieve ligera', 73: 'Nieve moderada',
+        75: 'Nieve fuerte', 95: 'Tormenta eléctrica'
+    },
+    
+    // Asigna un icono de FontAwesome basado en el código del clima
+    getIcon: (code) => {
+        if (code <= 1) return 'fa-sun';
+        if (code <= 3) return 'fa-cloud-sun';
+        if (code === 45 || code === 48) return 'fa-smog';
+        if (code >= 51 && code <= 67) return 'fa-cloud-rain';
+        if (code >= 71 && code <= 77) return 'fa-snowflake';
+        if (code >= 95) return 'fa-cloud-bolt';
+        return 'fa-cloud';
+    },
+
+    fetchLocalWeather: async (lat, lng) => {
+        try {
+            // Agregamos los parámetros 'daily' y 'timezone' para obtener la semana
+            const url = `${Config.WEATHER_API}?latitude=${lat}&longitude=${lng}&current_weather=true&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=auto`;
+            const res = await fetch(url);
+            const data = await res.json();
+            
+            if (data.current_weather) {
+                WeatherService.currentData = data.current_weather; 
+                WeatherService.dailyData = data.daily; // Guardamos los 7 días
+                WeatherService.render(data.current_weather);
+            }
+        } catch (err) {
+            console.warn('[WeatherService] Error al obtener el clima:', err);
+        }
+    },
+
+    render: (weather) => {
+        let weatherEl = document.getElementById('weather-widget');
+        if (!weatherEl) {
+            weatherEl = document.createElement('button'); 
+            weatherEl.id = 'weather-widget';
+            weatherEl.setAttribute('aria-label', 'Ver detalles del clima');
+            weatherEl.style.cssText = 'cursor: pointer; display:flex; align-items:center; gap:6px; font-size:14px; font-weight:700; color:var(--text); background:var(--card); padding:8px 12px; border-radius:18px; border:1px solid var(--border); margin-left: auto; margin-right: 12px; transition: all 0.2s ease;';
+            
+            weatherEl.onclick = () => WeatherService.showDetails();
+            
+            const headerActions = document.querySelector('.header-actions');
+            if (headerActions) {
+                headerActions.parentNode.insertBefore(weatherEl, headerActions);
+            }
+        }
+        
+        weatherEl.innerHTML = `
+            <i class="fa-solid fa-temperature-half" style="color:var(--accent)"></i> 
+            ${Math.round(weather.temperature)}°C
+        `;
+    },
+
+   showDetails: () => {
+        if (!WeatherService.currentData) return;
+        const weather = WeatherService.currentData;
+        const daily = WeatherService.dailyData;
+        const modal = document.getElementById('weather-modal');
+        if (!modal) return;
+        
+        const desc = WeatherService.weatherCodes[weather.weathercode] || 'Condiciones variables';
+        
+        let weeklyHtml = '';
+        if (daily && daily.time) {
+            weeklyHtml = `
+                <div class="weather-week-container">
+                    <div class="weather-week-title">Pronóstico de la semana</div>
+                    <div class="week-scroll">`;
+            
+            for (let i = 0; i < daily.time.length; i++) {
+                const date = new Date(daily.time[i] + 'T00:00:00');
+                const dayName = i === 0 ? 'Hoy' : date.toLocaleDateString('es-ES', { weekday: 'short', timeZone: 'UTC' });
+                const max = Math.round(daily.temperature_2m_max[i]);
+                const min = Math.round(daily.temperature_2m_min[i]);
+                const iconClass = WeatherService.getIcon(daily.weathercode[i]);
+
+                weeklyHtml += `
+                    <div class="day-card">
+                        <div class="day-name">${dayName}</div>
+                        <div class="day-icon"><i class="fa-solid ${iconClass}"></i></div>
+                        <div class="day-temps">
+                            <span class="day-max">${max}°</span>
+                            <span class="day-min">${min}°</span>
+                        </div>
+                    </div>`;
+            }
+            weeklyHtml += `</div></div>`;
+        }
+        
+        modal.innerHTML = `
+            <div class="set-box weather-content">
+                <div class="set-head">
+                    <div class="set-title">
+                        <i class="fa-solid fa-cloud-sun" aria-hidden="true"></i> Clima Local
+                    </div>
+                    <button class="set-close" onclick="WeatherService.close()" aria-label="Cerrar modal"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="set-body weather-body">
+                    <div class="weather-temp-main">${Math.round(weather.temperature)}°C</div>
+                    <div class="weather-desc">${desc}</div>
+                    <div class="weather-grid">
+                        <div class="weather-stat-card">
+                            <div class="weather-stat-label">Viento</div>
+                            <div class="weather-stat-val"><i class="fa-solid fa-wind" style="color: var(--muted)"></i> ${weather.windspeed} km/h</div>
+                        </div>
+                        <div class="weather-stat-card">
+                            <div class="weather-stat-label">Dirección</div>
+                            <div class="weather-stat-val"><i class="fa-regular fa-compass" style="color: var(--muted)"></i> ${weather.winddirection}°</div>
+                        </div>
+                    </div>
+                    ${weeklyHtml}
+                </div>
+            </div>
+        `;
+        modal.classList.add('open');
+    },
+
+    close: () => {
+        const modal = document.getElementById('weather-modal');
+        if (modal) modal.classList.remove('open');
+    }
+};
 /* SERVICIO DE GEOLOCALIZACIÓN */
 const LocationService = {
     locate: () => {
@@ -1187,6 +1166,9 @@ const LocationService = {
                 }
                 UIService.refreshView();
                 LocationService.checkNearby();
+                
+                WeatherService.fetchLocalWeather(lat, lng);
+                
                 Store.isLocating = false;
                 Utils.showToast(`Ubicación encontrada`);
                 Utils.announceToScreenReader('Ubicación actualizada');
@@ -1288,7 +1270,7 @@ const TsunamiService = {
                 </div>
                 <div class="tsm-actions">
                     <button class="tsm-btn" onclick="TsunamiService.close()">Cerrar</button>
-                    ${eq.url ? `<a href="${eq.url}" target="_blank" rel="noopener noreferrer" class="tsm-btn danger">Ver USGS</a>` : ''}
+                    ${eq.url ? `<a href="${eq.url}" target="_blank" rel="noopener noreferrer" class="tsm-btn danger">Ver Detalles</a>` : ''}
                 </div>
             </div>
         </div>
@@ -1473,7 +1455,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     AlertService.init();
     ConnectionService.init();
 
-    // Failsafe: si algo en la carga se cuelga (ej. IndexedDB lento/bloqueado), no dejar el loader pegado para siempre
     setTimeout(() => {
         if (!SpinnerService.hidden) {
             SpinnerService.hide();
@@ -1481,11 +1462,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }, 12000);
 
-    // Ajustes y favoritos se cargan en paralelo, sin bloquear la carga de sismos (que es lo que oculta el loader)
     SettingsService.load().catch(err => console.warn('[Settings] Error:', err));
-    FavoritesService.load()
-        .then(() => CloudService.init())
-        .catch(err => console.warn('[Favorites] Error:', err));
+    FavoritesService.load().catch(err => console.warn('[Favorites] Error:', err));
 
     if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();

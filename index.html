@@ -84,14 +84,16 @@
     <div id="toast" role="status" aria-live="polite"></div>
 
     <div id="alert-banner">
-        <div class="ab-icon-wrap" id="ab-icon-wrap"></div>
-        <div class="ab-body">
-            <div class="ab-eyebrow" id="ab-eyebrow"></div>
-            <div class="ab-title" id="ab-title"></div>
-            <div class="ab-msg" id="ab-msg"></div>
-            <div class="ab-detail" id="ab-detail"></div>
+        <div class="error__icon" id="ab-icon-wrap"></div>
+        <div class="error__content">
+            <div id="ab-eyebrow" class="error__eyebrow"></div>
+            <div id="ab-title" class="error__title"></div>
+            <div id="ab-msg" class="error__msg"></div>
+            <div id="ab-detail" class="error__detail"></div>
         </div>
-        <button class="ab-close" onclick="hideAlert()" aria-label="Cerrar alerta"><i class="fa-solid fa-xmark"></i></button>
+        <div class="error__close" onclick="hideAlert()" aria-label="Cerrar alerta">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" viewBox="0 0 20 20" height="20"><path fill="#fff" d="m15.8333 5.34166-1.175-1.175-4.6583 4.65834-4.65833-4.65834-1.175 1.175 4.65833 4.65834-4.65833 4.6583 1.175 1.175 4.65833-4.6583 4.6583 4.6583 1.175-1.175-4.6583-4.6583z"></path></svg>
+        </div>
         <div class="ab-progress" id="ab-progress"></div>
     </div>
 
@@ -107,10 +109,6 @@
                 <button class="set-close" onclick="SettingsService.close()" aria-label="Cerrar ajustes"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="set-body">
-                <div class="set-group" id="cloud-group" style="display:none">
-                    <label class="set-label">Cuenta y sincronización</label>
-                    <div class="fav-card" id="cloud-account"></div>
-                </div>
                 <div class="set-columns">
                     <div class="set-group set-group-favorites">
                         <label class="set-label">Zonas favoritas</label>
@@ -165,12 +163,13 @@
             </div>
         </div>
     </div>
+    <!-- MODAL DE CLIMA -->
+    <div id="weather-modal"></div>
 
    
 
     <script src="./assets/js/config.js"></script>
     <script src="./assets/js/leaflet.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./assets/js/app.js"></script>
     
     <script>
