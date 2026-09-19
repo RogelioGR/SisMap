@@ -11,7 +11,7 @@ const PRECACHE_ASSETS = [
   './assets/js/app.js',
   './assets/js/config.js',
   './assets/iconoApp.png',
-  './assets/manifest.webmanifest',  
+  './manifest.webmanifest', 
   './assets/css/leaflet.css',
   './assets/js/leaflet.js'
 ];
