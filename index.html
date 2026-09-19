@@ -35,7 +35,6 @@
             <div id="map-ctrl">
                 <button class="btn-icon ctrl ac" onclick="MapService.instance.zoomIn()" title="Acercar"><i class="fa-solid fa-plus"></i></button>
                 <button class="btn-icon ctrl ac" onclick="MapService.instance.zoomOut()" title="Alejar"><i class="fa-solid fa-minus"></i></button>
-                <button class="btn-icon ctrl ac" id="btn-evac" onclick="MapService.toggleEvacuationRoutes()" title="Rutas de evacuación" aria-label="Alternar rutas de evacuación"><i class="fa-solid fa-person-running"></i></button>
             </div>
 
             <div id="bottom-sheet" class="bottom-sheet collapsed">
@@ -108,61 +107,70 @@
                 <button class="set-close" onclick="SettingsService.close()" aria-label="Cerrar ajustes"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="set-body">
-                <div class="set-group">
-                    <label class="set-label" for="set-radius">Radio de sismos cercanos</label>
-                    <select id="set-radius" class="set-control" onchange="SettingsService.save({ nearbyRadiusKm: parseInt(this.value) })">
-                        <option value="200">200 km</option>
-                        <option value="500">500 km</option>
-                        <option value="1000">1000 km</option>
-                        <option value="1500">1500 km</option>
-                        <option value="3000">3000 km</option>
-                        <option value="5000">5000 km</option>
-                    </select>
+                <div class="set-group" id="cloud-group" style="display:none">
+                    <label class="set-label">Cuenta y sincronización</label>
+                    <div class="fav-card" id="cloud-account"></div>
                 </div>
-                <div class="set-group">
-                    <label class="set-label" for="set-threshold">Magnitud mínima para alertar</label>
-                    <select id="set-threshold" class="set-control" onchange="SettingsService.save({ alertThreshold: parseFloat(this.value) })">
-                        <option value="4.5">M 4.5+</option>
-                        <option value="5.0">M 5.0+</option>
-                        <option value="5.5">M 5.5+</option>
-                        <option value="5.9">M 5.9+</option>
-                        <option value="6.5">M 6.5+</option>
-                        <option value="7.0">M 7.0+</option>
-                    </select>
-                </div>
-                <div class="set-group">
-                    <label class="set-label" for="set-unit">Unidad de distancia</label>
-                    <select id="set-unit" class="set-control" onchange="SettingsService.save({ distanceUnit: this.value })">
-                        <option value="km">Kilómetros (km)</option>
-                        <option value="mi">Millas (mi)</option>
-                    </select>
-                </div>
-                <div class="set-group set-toggle-row">
-                    <label class="set-label" for="set-sound">Sonido de alertas</label>
-                    <label class="set-switch">
-                        <input type="checkbox" id="set-sound" onchange="SettingsService.save({ soundEnabled: this.checked })">
-                        <span class="set-switch-track"></span>
-                    </label>
-                </div>
-
-                <div class="set-group set-group-favorites">
-                    <label class="set-label">Zonas favoritas</label>
-                    <div id="fav-zones-list" class="fav-zones-list"></div>
-                    <div class="fav-add-row">
-                        <input type="text" id="fav-search-name" class="set-control" placeholder="Nombre (ej. Casa de mis papás)">
-                        <input type="text" id="fav-search-city" class="set-control" placeholder="Ciudad a buscar (ej. Guadalajara, MX)">
-                        <button class="fav-add-btn" onclick="FavoritesService.searchAndAdd()">
-                            <i class="fa-solid fa-plus" aria-hidden="true"></i> Agregar zona
-                        </button>
+                <div class="set-columns">
+                    <div class="set-group set-group-favorites">
+                        <label class="set-label">Zonas favoritas</label>
+                        <div class="fav-card">
+                            <div id="fav-zones-list" class="fav-zones-list"></div>
+                            <div class="fav-add-row">
+                                <input type="text" id="fav-search-name" class="set-control" placeholder="Nombre (ej. Casa)">
+                                <input type="text" id="fav-search-city" class="set-control" autocomplete="street-address"
+                                       placeholder="Dirección o ciudad (ej. Emiliano Zapata 21, Centro, 39000 Chilpancingo de los Bravo, Gro.)"
+                                       onkeydown="if(event.key==='Enter'){FavoritesService.searchAndAdd()}">
+                                <button class="fav-add-btn" onclick="FavoritesService.searchAndAdd()">
+                                    <i class="fa-solid fa-magnifying-glass-location" aria-hidden="true"></i> Buscar y agregar
+                                </button>
+                            </div>
+                            <div id="fav-results" class="fav-results" aria-live="polite"></div>
+                            <p class="fav-hint">Puedes escribir una dirección completa o solo una ciudad. Las alertas de sismo cercano se evaluarán también contra cada zona guardada, además de tu ubicación GPS.</p>
+                        </div>
                     </div>
-                    <p class="fav-hint">Las alertas de sismo cercano se evaluarán también contra cada zona guardada, además de tu ubicación GPS.</p>
+
+                    <div class="set-basic-settings">
+                        <div class="set-group">
+                            <label class="set-label" for="set-radius">Radio de sismos cercanos</label>
+                            <select id="set-radius" class="set-control" onchange="SettingsService.save({ nearbyRadiusKm: parseInt(this.value) })">
+                                <option value="200">200 km</option>
+                                <option value="500">500 km</option>
+                                <option value="1000">1000 km</option>
+                                <option value="1500">1500 km</option>
+                                <option value="3000">3000 km</option>
+                                <option value="5000">5000 km</option>
+                            </select>
+                        </div>
+                        <div class="set-group">
+                            <label class="set-label" for="set-threshold">Magnitud mínima para alertar</label>
+                            <select id="set-threshold" class="set-control" onchange="SettingsService.save({ alertThreshold: parseFloat(this.value) })">
+                                <option value="4.5">M 4.5+</option>
+                                <option value="5.0">M 5.0+</option>
+                                <option value="5.5">M 5.5+</option>
+                                <option value="5.9">M 5.9+</option>
+                                <option value="6.5">M 6.5+</option>
+                                <option value="7.0">M 7.0+</option>
+                            </select>
+                        </div>
+                        <div class="set-group set-toggle-row">
+                            <label class="set-label" for="set-sound">Sonido de alertas</label>
+                            <label class="set-switch">
+                                <input type="checkbox" id="set-sound" onchange="SettingsService.save({ soundEnabled: this.checked })">
+                                <span class="set-switch-track"></span>
+                            </label>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
+   
+
     <script src="./assets/js/config.js"></script>
     <script src="./assets/js/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./assets/js/app.js"></script>
     
     <script>

@@ -273,75 +273,6 @@ const MapService = {
         }
     },
 
-    /* CAPA DE RUTAS DE EVACUACIÓN (OpenStreetMap route=evacuation, vía Overpass) */
-    toggleEvacuationRoutes: async function() {
-        if (!MapService.instance) return;
-        if (Store.evacuationLayer) {
-            MapService.instance.removeLayer(Store.evacuationLayer);
-            Store.evacuationLayer = null;
-            document.getElementById('btn-evac')?.classList.remove('active');
-            return;
-        }
-        document.getElementById('btn-evac')?.classList.add('active');
-        await MapService.loadEvacuationRoutes();
-    },
-
-    loadEvacuationRoutes: async function() {
-        const map = MapService.instance;
-        const center = map.getCenter();
-        const radiusM = Config.EVACUATION.SEARCH_RADIUS_KM * 1000;
-        Utils.showToast('Buscando rutas de evacuación cercanas…');
-
-        const query = `[out:json][timeout:25];relation["route"="evacuation"](around:${radiusM},${center.lat},${center.lng});out geom;`;
-
-        try {
-            const res = await fetch(Config.EVACUATION.OVERPASS_URL, {
-                method: 'POST',
-                body: 'data=' + encodeURIComponent(query)
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            const relations = (data.elements || []).filter(el => el.type === 'relation');
-
-            if (relations.length === 0) {
-                Utils.showToast('No hay rutas de evacuación mapeadas cerca de aquí (cobertura limitada en OpenStreetMap)');
-                document.getElementById('btn-evac')?.classList.remove('active');
-                Store.evacuationLayer = null;
-                return;
-            }
-
-            const group = L.layerGroup();
-            relations.forEach(rel => {
-                const type = rel.tags?.evacuation_route || 'default';
-                const color = Config.EVACUATION.COLORS[type] || Config.EVACUATION.COLORS.default;
-                const name = rel.tags?.name || rel.tags?.ref || 'Ruta de evacuación';
-
-                (rel.members || []).forEach(member => {
-                    if (member.type !== 'way' || !member.geometry) return;
-                    const latlngs = member.geometry.map(pt => [pt.lat, pt.lon]);
-                    if (latlngs.length < 2) return;
-                    const line = L.polyline(latlngs, {
-                        color,
-                        weight: 4,
-                        opacity: 0.85,
-                        dashArray: '10, 8'
-                    });
-                    line.bindPopup(`<strong>${name}</strong><br>Tipo: ${type}`);
-                    group.addLayer(line);
-                });
-            });
-
-            group.addTo(map);
-            Store.evacuationLayer = group;
-            Utils.showToast(`${relations.length} ruta(s) de evacuación encontrada(s)`);
-        } catch (err) {
-            console.error('[Evacuación] Error:', err);
-            Utils.showToast('No se pudieron cargar las rutas de evacuación');
-            document.getElementById('btn-evac')?.classList.remove('active');
-            Store.evacuationLayer = null;
-        }
-    },
-
     /* BÚSQUEDA DE CIUDADES (Nominatim / OpenStreetMap, gratis, sin API key) */
     searchCity: async function(query) {
         if (!query || !query.trim()) return null;
@@ -364,6 +295,54 @@ const MapService = {
             console.error('[MapService] Error de geocodificación:', err);
             Utils.showToast('Error al buscar la ciudad');
             return null;
+        }
+    },
+
+    /* BÚSQUEDA POR DIRECCIÓN COMPLETA con reintentos progresivos (Nominatim).
+       Ej: "Emiliano Zapata 21, Centro, 39000 Chilpancingo de los Bravo, Gro."
+       Devuelve [{ lat, lng, label, precise }] */
+    searchAddress: async function(query) {
+        const raw = (query || '').trim();
+        if (!raw) return [];
+        const parts = raw.split(',').map(p => p.trim()).filter(Boolean);
+        const stripNum = s => s.replace(/\s*(#|no\.?|núm\.?|num\.?)?\s*\d+\s*[a-z]?$/i, '').trim();
+
+        // De la más específica a la más general
+        const attempts = [{ q: raw, precise: true }];
+        if (parts.length > 2) attempts.push({ q: [parts[0], ...parts.slice(2)].join(', '), precise: true }); // sin colonia
+        const street = stripNum(parts[0]);
+        if (parts.length > 1 && street && street !== parts[0]) {
+            attempts.push({ q: [street, ...parts.slice(2)].join(', '), precise: false });                   // calle sin número
+        }
+        attempts.push({ q: parts.slice(parts.length > 2 ? 2 : 1).join(', '), precise: false });               // CP + ciudad
+
+        Utils.showToast('Buscando dirección…');
+        const seen = new Set();
+        let first = true;
+        try {
+            for (const a of attempts) {
+                if (!a.q || seen.has(a.q)) continue;
+                seen.add(a.q);
+                if (!first) await new Promise(r => setTimeout(r, 1100)); // Nominatim: máx. 1 petición/seg
+                first = false;
+                const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&accept-language=es&q=${encodeURIComponent(a.q)}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const results = await res.json();
+                if (results.length) {
+                    return results.map(r => ({
+                        lat: parseFloat(r.lat),
+                        lng: parseFloat(r.lon),
+                        label: r.display_name,
+                        precise: a.precise
+                    }));
+                }
+            }
+            return [];
+        } catch (err) {
+            console.error('[MapService] Error de geocodificación:', err);
+            Utils.showToast('Error al buscar la dirección');
+            return [];
         }
     }
 };
@@ -805,6 +784,139 @@ const AlertService = {
     }
 };
 
+/* SERVICIO DE NUBE (Supabase) — opcional: sin credenciales o sin sesión, la app sigue 100% local */
+const CloudService = {
+    client: null,
+    user: null,
+
+    enabled: () => !!(Config.SUPABASE.URL && Config.SUPABASE.ANON_KEY && window.supabase),
+
+    init: async () => {
+        if (!CloudService.enabled()) {
+            CloudService.renderAccount();
+            return;
+        }
+        CloudService.client = window.supabase.createClient(Config.SUPABASE.URL, Config.SUPABASE.ANON_KEY);
+        CloudService.client.auth.onAuthStateChange((_event, session) => {
+            const prevId = CloudService.user?.id;
+            CloudService.user = session?.user || null;
+            CloudService.renderAccount();
+            // Fuera del callback para no bloquear el cliente de auth
+            if (CloudService.user && CloudService.user.id !== prevId) {
+                setTimeout(() => FavoritesService.sync(), 0);
+            }
+        });
+    },
+
+    mode: 'login', // 'login' | 'signup'
+    busy: false,
+
+    setMode: (mode) => {
+        const email = document.getElementById('cloud-email')?.value || '';
+        CloudService.mode = mode;
+        CloudService.renderAccount();
+        const el = document.getElementById('cloud-email');
+        if (el) el.value = email;
+    },
+
+    _errorMsg: (err) => {
+        const m = (err?.message || '').toLowerCase();
+        if (m.includes('invalid login')) return 'Correo o contraseña incorrectos';
+        if (m.includes('not confirmed')) return 'Confirma tu correo antes de iniciar sesión';
+        if (m.includes('already registered')) return 'Ese correo ya está registrado';
+        if (m.includes('rate limit') || m.includes('security purposes')) return 'Demasiados intentos, espera un minuto';
+        if (m.includes('database error')) return 'Error del servidor al crear la cuenta';
+        if (m.includes('password')) return 'Contraseña no válida (mínimo 8 caracteres)';
+        return 'No se pudo completar la acción';
+    },
+
+    submit: async () => {
+        if (CloudService.busy || !CloudService.client) return;
+        const email = document.getElementById('cloud-email')?.value.trim();
+        const password = document.getElementById('cloud-password')?.value || '';
+        const isSignup = CloudService.mode === 'signup';
+
+        if (!email || !/^\S+@\S+\.\S+$/.test(email)) { Utils.showToast('Escribe un correo válido'); return; }
+        if (password.length < 8) { Utils.showToast('La contraseña debe tener al menos 8 caracteres'); return; }
+        if (isSignup && password !== document.getElementById('cloud-password2')?.value) {
+            Utils.showToast('Las contraseñas no coinciden');
+            return;
+        }
+
+        CloudService.busy = true;
+        const btn = document.getElementById('cloud-submit');
+        if (btn) btn.disabled = true;
+        try {
+            if (isSignup) {
+                const { data, error } = await CloudService.client.auth.signUp({
+                    email,
+                    password,
+                    options: { emailRedirectTo: window.location.origin + window.location.pathname }
+                });
+                if (error) throw error;
+                if (data.user && data.user.identities && data.user.identities.length === 0) {
+                    Utils.showToast('Ese correo ya está registrado');
+                } else if (!data.session) {
+                    Utils.showToast('Cuenta creada. Revisa tu correo para confirmarla', 6000);
+                } else {
+                    Utils.showToast('Cuenta creada');
+                }
+            } else {
+                const { error } = await CloudService.client.auth.signInWithPassword({ email, password });
+                if (error) throw error;
+                Utils.showToast('Sesión iniciada');
+            }
+        } catch (err) {
+            console.warn('[Cloud] auth:', err?.message);
+            Utils.showToast(CloudService._errorMsg(err), 4000);
+        } finally {
+            CloudService.busy = false;
+            const b = document.getElementById('cloud-submit');
+            if (b) b.disabled = false;
+        }
+    },
+
+    signOut: async () => {
+        await CloudService.client.auth.signOut();
+        Utils.showToast('Sesión cerrada');
+    },
+
+    renderAccount: () => {
+        const group = document.getElementById('cloud-group');
+        const box = document.getElementById('cloud-account');
+        if (!group || !box) return;
+        if (!CloudService.enabled()) { group.style.display = 'none'; return; }
+        group.style.display = '';
+        if (CloudService.user) {
+            box.innerHTML = `
+                <div class="fav-zone-row">
+                    <span class="fav-zone-name"><i class="fa-solid fa-cloud" aria-hidden="true"></i> ${FavoritesService.esc(CloudService.user.email)}</span>
+                    <button class="fav-add-btn" onclick="CloudService.signOut()">Cerrar sesión</button>
+                </div>
+                <p class="fav-hint">Tus zonas favoritas se sincronizan con tu cuenta.</p>`;
+        } else {
+            const signup = CloudService.mode === 'signup';
+            box.innerHTML = `
+                <div class="cloud-tabs" role="tablist">
+                    <button type="button" class="cloud-tab ${signup ? '' : 'active'}" role="tab" aria-selected="${!signup}" onclick="CloudService.setMode('login')">Iniciar sesión</button>
+                    <button type="button" class="cloud-tab ${signup ? 'active' : ''}" role="tab" aria-selected="${signup}" onclick="CloudService.setMode('signup')">Registrarse</button>
+                </div>
+                <div class="cloud-form">
+                    <input type="email" id="cloud-email" class="set-control" placeholder="Correo electrónico" autocomplete="email">
+                    <input type="password" id="cloud-password" class="set-control" placeholder="Contraseña (mín. 8 caracteres)"
+                           autocomplete="${signup ? 'new-password' : 'current-password'}"
+                           onkeydown="if(event.key==='Enter'){CloudService.submit()}">
+                    ${signup ? `<input type="password" id="cloud-password2" class="set-control" placeholder="Repite la contraseña" autocomplete="new-password"
+                           onkeydown="if(event.key==='Enter'){CloudService.submit()}">` : ''}
+                    <button type="button" id="cloud-submit" class="fav-add-btn" onclick="CloudService.submit()">
+                        <i class="fa-solid ${signup ? 'fa-user-plus' : 'fa-right-to-bracket'}" aria-hidden="true"></i> ${signup ? 'Crear cuenta' : 'Entrar'}
+                    </button>
+                </div>
+                <p class="fav-hint">Con una cuenta, tus zonas favoritas se sincronizan entre dispositivos. Sin cuenta se guardan solo en este dispositivo.</p>`;
+        }
+    }
+};
+
 /* SERVICIO DE ZONAS FAVORITAS (multi-ubicación) */
 const FavoritesService = {
     load: async () => {
@@ -827,12 +939,19 @@ const FavoritesService = {
         }
     },
 
-    add: async (name, lat, lng) => {
-        const zone = { id: `z_${Date.now()}`, name, lat, lng };
+    pending: [],
+    pendingQuery: '',
+
+    esc: (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
+
+    add: async (name, lat, lng, address = '', precise = false) => {
+        const zone = { id: FavoritesService.uuid(), name, lat, lng, address, precise, synced: false };
         Store.favoriteZones.push(zone);
         await FavoritesService.persist();
         FavoritesService.render();
         Utils.showToast(`"${name}" agregada a zonas favoritas`);
+        FavoritesService.cloudUpsert([zone]);
+        return zone;
     },
 
     remove: async (id) => {
@@ -841,29 +960,128 @@ const FavoritesService = {
         await FavoritesService.persist();
         FavoritesService.render();
         if (zone) Utils.showToast(`"${zone.name}" eliminada`);
+        FavoritesService.cloudDelete(id);
     },
 
     flyTo: (id) => {
         const zone = Store.favoriteZones.find(z => z.id === id);
         if (!zone || !MapService.instance) return;
-        MapService.instance.flyTo([zone.lat, zone.lng], 9, { animate: true, duration: 1.5 });
+        const zoom = zone.address ? (zone.precise ? 17 : 13) : 9;
+        MapService.instance.flyTo([zone.lat, zone.lng], zoom, { animate: true, duration: 1.5 });
         SettingsService.close();
     },
 
     searchAndAdd: async () => {
-        const nameInput = document.getElementById('fav-search-name');
-        const cityInput = document.getElementById('fav-search-city');
-        const name = nameInput?.value.trim();
-        const city = cityInput?.value.trim();
-        if (!city) {
-            Utils.showToast('Escribe una ciudad para buscar');
+        const query = document.getElementById('fav-search-city')?.value.trim();
+        if (!query) {
+            Utils.showToast('Escribe una dirección o ciudad');
             return;
         }
-        const coords = await MapService.searchCity(city);
-        if (!coords) return;
-        await FavoritesService.add(name || coords.name, coords.lat, coords.lng);
+        const results = await MapService.searchAddress(query);
+        if (!results.length) {
+            Utils.showToast(`No se encontró "${query}"`);
+            return;
+        }
+        FavoritesService.pending = results;
+        FavoritesService.pendingQuery = query;
+        // Un solo resultado exacto: se guarda directo. Si no, el usuario elige.
+        if (results.length === 1 && results[0].precise) {
+            await FavoritesService.pick(0);
+        } else {
+            FavoritesService.renderResults();
+        }
+    },
+
+    renderResults: () => {
+        const box = document.getElementById('fav-results');
+        if (!box) return;
+        const list = FavoritesService.pending;
+        if (!list.length) { box.innerHTML = ''; return; }
+        const note = list[0].precise
+            ? 'Elige la ubicación correcta:'
+            : 'No se halló el número exacto; estas son ubicaciones aproximadas. Elige una:';
+        box.innerHTML = `<p class="fav-results-note">${note}</p>` + list.map((r, i) => `
+            <button type="button" class="fav-result" onclick="FavoritesService.pick(${i})">
+                <i class="fa-solid fa-location-dot" aria-hidden="true"></i> ${FavoritesService.esc(r.label)}
+            </button>`).join('');
+    },
+
+    pick: async (i) => {
+        const r = FavoritesService.pending[i];
+        if (!r) return;
+        const nameInput = document.getElementById('fav-search-name');
+        const addrInput = document.getElementById('fav-search-city');
+        const fallbackName = FavoritesService.pendingQuery.split(',')[0].trim() || r.label.split(',')[0];
+        const zone = await FavoritesService.add(nameInput?.value.trim() || fallbackName, r.lat, r.lng, r.label, r.precise);
+        if (!r.precise) Utils.showToast('Ubicación aproximada (calle/colonia)');
+        FavoritesService.pending = [];
+        FavoritesService.renderResults();
         if (nameInput) nameInput.value = '';
-        if (cityInput) cityInput.value = '';
+        if (addrInput) addrInput.value = '';
+        FavoritesService.flyTo(zone.id);
+    },
+
+    uuid: () => (crypto.randomUUID
+        ? crypto.randomUUID()
+        : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0;
+            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+        })),
+
+    cloudUpsert: async (zones) => {
+        if (!CloudService.user || !CloudService.client || !zones.length) return false;
+        const rows = zones.map(z => ({
+            id: z.id,
+            user_id: CloudService.user.id,
+            name: z.name,
+            address: z.address || null,
+            lat: z.lat,
+            lng: z.lng,
+            precise: !!z.precise
+        }));
+        const { error } = await CloudService.client.from('favorite_zones').upsert(rows);
+        if (error) {
+            console.warn('[Cloud] upsert:', error.message);
+            Utils.showToast('No se pudo sincronizar con la nube');
+            return false; // quedan con synced:false y se reintentan en la próxima sincronización
+        }
+        zones.forEach(z => { z.synced = true; });
+        await FavoritesService.persist();
+        return true;
+    },
+
+    cloudDelete: async (id) => {
+        if (!CloudService.user || !CloudService.client) return;
+        const { error } = await CloudService.client.from('favorite_zones').delete().eq('id', id);
+        if (error) console.warn('[Cloud] delete:', error.message);
+    },
+
+    /* La nube es la fuente de verdad para zonas ya sincronizadas; las locales nuevas (synced:false) se suben. */
+    sync: async () => {
+        if (!CloudService.user || !CloudService.client) return;
+        const isUuid = v => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+        // Migra ids antiguos (z_123...) al formato uuid que exige la tabla
+        Store.favoriteZones.forEach(z => { if (!isUuid(z.id)) { z.id = FavoritesService.uuid(); z.synced = false; } });
+
+        const { data, error } = await CloudService.client.from('favorite_zones').select('*').order('created_at');
+        if (error) {
+            console.warn('[Cloud] select:', error.message);
+            Utils.showToast('No se pudo leer tus zonas de la nube');
+            return;
+        }
+        const cloudIds = new Set(data.map(r => r.id));
+        // Ya sincronizadas pero ausentes en la nube = borradas desde otro dispositivo
+        Store.favoriteZones = Store.favoriteZones.filter(z => !z.synced || cloudIds.has(z.id));
+        const localIds = new Set(Store.favoriteZones.map(z => z.id));
+        const fromCloud = data
+            .filter(r => !localIds.has(r.id))
+            .map(r => ({ id: r.id, name: r.name, address: r.address || '', lat: r.lat, lng: r.lng, precise: !!r.precise, synced: true }));
+        Store.favoriteZones.push(...fromCloud);
+        const toUpload = Store.favoriteZones.filter(z => !z.synced);
+        await FavoritesService.persist();
+        await FavoritesService.cloudUpsert(toUpload);
+        FavoritesService.render();
+        Utils.showToast('Zonas sincronizadas');
     },
 
     render: () => {
@@ -875,9 +1093,13 @@ const FavoritesService = {
                 list.innerHTML = Store.favoriteZones.map(z => `
                     <div class="fav-zone-row">
                         <button class="fav-zone-name" onclick="FavoritesService.flyTo('${z.id}')" title="Ir al mapa">
-                            <i class="fa-solid fa-location-dot" aria-hidden="true"></i> ${z.name}
+                            <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+                            <span class="fav-zone-text">
+                                <span class="fav-zone-title">${FavoritesService.esc(z.name)}</span>
+                                ${z.address ? `<small>${FavoritesService.esc(z.address)}</small>` : ''}
+                            </span>
                         </button>
-                        <button class="fav-zone-remove" onclick="FavoritesService.remove('${z.id}')" aria-label="Eliminar ${z.name}">
+                        <button class="fav-zone-remove" onclick="FavoritesService.remove('${z.id}')" aria-label="Eliminar ${FavoritesService.esc(z.name)}">
                             <i class="fa-solid fa-trash"></i>
                         </button>
                     </div>
@@ -905,8 +1127,8 @@ const FavoritesService = {
                 })
             });
             marker.bindPopup(`
-                <strong>${zone.name}</strong><br>
-                <span style="font-size:12px;color:var(--muted)">Zona favorita</span><br>
+                <strong>${FavoritesService.esc(zone.name)}</strong><br>
+                <span style="font-size:12px;color:var(--muted)">${zone.address ? FavoritesService.esc(zone.address) : 'Zona favorita'}</span><br>
                 <button class="eq-popup-link eq-popup-action" onclick="FavoritesService.remove('${zone.id}')">
                     <i class="fa-solid fa-trash" aria-hidden="true"></i> Quitar de favoritas
                 </button>
@@ -1261,7 +1483,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Ajustes y favoritos se cargan en paralelo, sin bloquear la carga de sismos (que es lo que oculta el loader)
     SettingsService.load().catch(err => console.warn('[Settings] Error:', err));
-    FavoritesService.load().catch(err => console.warn('[Favorites] Error:', err));
+    FavoritesService.load()
+        .then(() => CloudService.init())
+        .catch(err => console.warn('[Favorites] Error:', err));
 
     if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
