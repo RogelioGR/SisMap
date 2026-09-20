@@ -109,7 +109,7 @@ const MapService = {
             maxZoom: Config.MAP.MAX_ZOOM,
             zoomControl: false,
             maxBounds: L.latLngBounds([-85, -180], [85, 180]),
-            preferCanvas: true
+            preferCanvas: true // Optimización de renderizado nativo de Leaflet
         });
         MapService.updateTheme(document.documentElement.getAttribute('data-theme') || 'dark');
     },
@@ -134,6 +134,7 @@ const MapService = {
         const currentIds = new Set();
         const visibleIds = new Set((visibleQuakes || quakes).map(eq => eq.id));
         const pending = [];
+        
         quakes.forEach(eq => {
             currentIds.add(eq.id);
             const shouldBeVisible = visibleIds.has(eq.id);
@@ -151,7 +152,9 @@ const MapService = {
                 pending.push({ eq, shouldBeVisible });
             }
         });
-        const batchSize = 20;
+        
+        // Renderizado en lotes optimizado a 30 por frame para mayor rapidez
+        const batchSize = 30; 
         let i = 0;
         const addBatch = () => {
             const slice = pending.slice(i, i + batchSize);
@@ -165,9 +168,9 @@ const MapService = {
                     fillOpacity: 0.85,
                     className: 'quake-marker'
                 });
-                if (typeof UIService.createPopupContent === 'function') {
-                    marker.bindPopup(() => UIService.createPopupContent(eq), { maxWidth: 280, closeButton: true });
-                }
+                
+                marker.bindPopup(() => UIService.createPopupContent(eq), { maxWidth: 280, closeButton: true });
+                
                 marker.on('popupopen', () => {
                     marker.setStyle({ radius: r * 1.2 });
                     Utils.announceToScreenReader(`Sismo M${eq.label} en ${eq.place}`);
@@ -175,9 +178,8 @@ const MapService = {
                 marker.on('popupclose', () => {
                     marker.setStyle({ radius: r });
                 });
-                marker.on('click', () => {
-                    UIService.flyToQuake(eq);
-                });
+                marker.on('click', () => UIService.flyToQuake(eq));
+                
                 Store.markers[eq.id] = marker;
                 if (shouldBeVisible) {
                     marker.addTo(map);
@@ -189,6 +191,7 @@ const MapService = {
             }
         };
         if (pending.length > 0) addBatch();
+        
         for (let id in Store.markers) {
             if (!currentIds.has(id)) {
                 if (map.hasLayer(Store.markers[id])) {
@@ -281,7 +284,6 @@ const MapService = {
             Utils.showToast('ShakeMap oculto');
         }
     },
-
     searchCity: async function(query) {
         if (!query || !query.trim()) return null;
         Utils.showToast('Buscando ciudad…');
@@ -305,7 +307,6 @@ const MapService = {
             return null;
         }
     },
-
     searchAddress: async function(query) {
         const raw = (query || '').trim();
         if (!raw) return [];
@@ -415,17 +416,15 @@ const UIService = {
         const shareBtn = `
   <button class="eq-popup-link eq-popup-action" onclick="UIService.shareQuake(Store.quakes.find(q => q.id === '${eq.id}'))">
         <img src="./assets/iconoApp.png" alt="" style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">
-        Compartir este sismo
-    </button>
-        `;
+        Compartir
+    </button>`;
 
         const hasShakeMap = eq.types && eq.types.includes('shakemap');
         const shakeMapBtn = hasShakeMap ? `
               <button class="eq-popup-link eq-popup-action eq-popup-shakemap" onclick="MapService.toggleShakeMap('${eq.detailUrl}')">
         <img src="./assets/iconoApp.png" alt="" style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">
-        Ver Mapa de Sacudimiento
-    </button>
-        ` : '';
+        ShakeMap
+    </button>` : '';
 
         return `
             <div class="eq-popup" role="article" aria-label="Detalles del sismo">
@@ -447,9 +446,11 @@ const UIService = {
                         <div class="eq-popup-sub">${depthLbl}</div>
                     </div>
                 </div>
-                ${eq.url ? `<a href="${eq.url}" target="_blank" rel="noopener noreferrer" class="eq-popup-link">Ver detalles oficiales</a>` : ''}
-                ${shareBtn}
-                ${shakeMapBtn}
+                ${eq.url ? `<a href="${eq.url}" target="_blank" rel="noopener noreferrer" class="eq-popup-link" style="display:block;text-align:center;margin-bottom:4px;color:var(--accent);font-size:12px;font-weight:600;">Ver detalles oficiales</a>` : ''}
+                <div style="display:flex;gap:6px;">
+                    ${shareBtn}
+                    ${shakeMapBtn}
+                </div>
                 ${tsAlert}
             </div>
         `;
@@ -489,8 +490,8 @@ const UIService = {
         const filtered = visibleQuakes || UIService.getVisibleQuakes();
         if (countEl) {
             countEl.textContent = `${filtered.length} de ${Store.quakes.length} terremotos`;
-            countEl.setAttribute('aria-live', 'polite');
         }
+        
         if (filtered.length === 0) {
             container.innerHTML = `
                 <div class="empty-state" role="status">
@@ -500,21 +501,33 @@ const UIService = {
             `;
             return;
         }
+
+        // OPTIMIZACIÓN: Removemos nodos que ya no están en la lista usando Set para acceso rápido (O(1))
         const filteredIds = new Set(filtered.map(eq => eq.id));
-        [...container.children].forEach(node => {
-            if (!node.dataset || !filteredIds.has(node.dataset.id)) {
+        Array.from(container.children).forEach(node => {
+            if (node.dataset.id && !filteredIds.has(node.dataset.id)) {
                 node.remove();
             }
         });
+
+        // OPTIMIZACIÓN: DocumentFragment para inyectar todas las tarjetas nuevas de golpe al DOM
+        const fragment = document.createDocumentFragment();
+        
         filtered.forEach((eq, index) => {
             let card = container.querySelector(`[data-id="${eq.id}"]`);
             if (!card) {
                 card = UIService.buildCard(eq);
-                card.style.animationDelay = `${index * 25}ms`;
-                container.appendChild(card);
+                // Limitamos la demora de animación a los primeros 10 elementos para no trabar cargas largas
+                card.style.animationDelay = `${Math.min(index, 10) * 20}ms`;
+                fragment.appendChild(card);
+            } else {
+                card.style.order = index;
             }
-            card.style.order = index;
         });
+        
+        if (fragment.childNodes.length > 0) {
+            container.appendChild(fragment);
+        }
     },
     flyToQuake: (eq) => {
         BottomSheet.collapse();
@@ -547,7 +560,8 @@ const DataService = {
     loadCachedFirst: async () => {
         try {
             const cached = await DBService.getQuakes();
-            if (!cached.length || Store.quakes.length) return;
+            if (!cached.length || Store.quakes.length) return false;
+            
             const sorted = cached.sort((a, b) => b.time - a.time).slice(0, 100);
             if (Store.userLocation) {
                 sorted.forEach(eq => {
@@ -557,11 +571,13 @@ const DataService = {
             Store.quakes = sorted;
             Store.knownIds = {};
             sorted.forEach(q => Store.knownIds[q.id] = true);
+            
             UIService.refreshView();
-            SpinnerService.hide();
-            Utils.showToast('Mostrando datos guardados mientras se actualiza…');
+            SpinnerService.hide(); // Oculta spinner instantáneamente si hay caché
+            return true;
         } catch (err) {
             console.warn('[DataService] No se pudo precargar caché:', err);
+            return false;
         }
     },
 
@@ -580,31 +596,22 @@ const DataService = {
             } catch (error) {
                 if (i === retries - 1) throw error;
                 const backoffDelay = delay * Math.pow(2, i);
-                console.warn(`[DataService] Intento ${i + 1} fallido. Reintentando en ${backoffDelay}ms...`);
-                await new Promise(resolve => {
-                    Store.timers.retry = setTimeout(resolve, backoffDelay);
-                });
+                await new Promise(resolve => setTimeout(resolve, backoffDelay));
             }
         }
     },
     fetchQuakes: async () => {
         try {
-            // Se piden los datos a ambas APIs (USGS y EMSC) en paralelo
+            // Paralelización de peticiones para obtener de ambas APIs al mismo tiempo
             const [res1, res2] = await Promise.allSettled([
                 DataService.fetchWithRetry(Config.API_URL),
                 DataService.fetchWithRetry(Config.API_URL_2)
             ]);
 
             let features = [];
-            
-            if (res1.status === 'fulfilled' && res1.value.features) {
-                features = features.concat(res1.value.features);
-            }
-            if (res2.status === 'fulfilled' && res2.value.features) {
-                features = features.concat(res2.value.features);
-            }
+            if (res1.status === 'fulfilled' && res1.value.features) features = features.concat(res1.value.features);
+            if (res2.status === 'fulfilled' && res2.value.features) features = features.concat(res2.value.features);
 
-            // Normaliza y elimina duplicados, guardando en un Map
             const uniqueQuakes = new Map();
             features.forEach(f => {
                 const normalized = Utils.normalizeQuake(f);
@@ -613,7 +620,6 @@ const DataService = {
                 }
             });
 
-            // Convertimos a array, ordenamos por tiempo más reciente y limitamos a 150 sismos
             const newQuakes = Array.from(uniqueQuakes.values())
                 .sort((a, b) => b.time - a.time)
                 .slice(0, 150);
@@ -626,10 +632,10 @@ const DataService = {
             
             const changed = newQuakes.length !== Store.quakes.length || newQuakes[0]?.id !== Store.quakes[0]?.id;
             if (changed) {
-                await DBService.saveQuakes(newQuakes).catch(err => {
-                    console.warn('[DBService] No se pudo guardar en caché:', err);
-                });
+                // Guarda en IndexedDB de fondo sin bloquear el hilo principal
+                DBService.saveQuakes(newQuakes).catch(err => console.warn('[DB] Caché falló:', err));
             }
+            
             if (!Store.isFirstLoad) {
                 DataService.checkForAlerts(newQuakes);
             } else {
@@ -639,28 +645,20 @@ const DataService = {
                 }
                 Store.isFirstLoad = false;
             }
+            
             Store.knownIds = {};
             newQuakes.forEach(q => Store.knownIds[q.id] = true);
             Store.quakes = newQuakes;
             Store.lastFetchTime = Date.now();
+            
             UIService.refreshView();
+            
             if (Store.userLocation) LocationService.checkNearby();
             FavoritesService.checkNearby();
-            Utils.showToast(`${newQuakes.length} terremotos cargados`);
+            
             Store.retryCount = 0;
         } catch (error) {
             console.error("[DataService] Error crítico:", error);
-            try {
-                const cached = await DBService.getQuakes();
-                if (cached.length > 0) {
-                    Store.quakes = cached;
-                    UIService.refreshView();
-                    Utils.showToast('Mostrando datos en caché (sin conexión)');
-                }
-            } catch (cacheErr) {
-                console.warn('[DataService] No hay caché disponible');
-            }
-            Utils.showToast('Error al cargar datos. Verifica tu conexión.');
             ConnectionService.requestBackgroundSync();
         } finally {
             ConnectionService.render();
@@ -686,7 +684,7 @@ const DataService = {
             if (el) {
                 el.innerHTML = countdown > 0
                     ? `<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> ${countdown}s`
-                    : `<i class="fa-solid fa-rotate-right fa-spin" aria-hidden="true"></i> Actualizando...`;
+                    : `<i class="fa-solid fa-rotate-right fa-spin" aria-hidden="true"></i> ...`;
             }
             if (countdown <= 0) {
                 countdown = Config.REFRESH_INTERVAL;
@@ -702,8 +700,6 @@ const DataService = {
             const res = await fetch('https://api.weather.gov/alerts/active?event=Tsunami%20Warning,Tsunami%20Watch,Tsunami%20Advisory');
             const data = await res.json();
             if (data.features && data.features.length > 0) {
-                const count = data.features.length;
-                Utils.showToast(`⚠️ ${count} alerta(s) de tsunami activa(s) en el mundo`);
                 const firstAlert = data.features[0].properties;
                 if (firstAlert.severity === 'Extreme' || firstAlert.severity === 'Severe') {
                     const fakeQuake = {
@@ -719,6 +715,134 @@ const DataService = {
         } catch (err) {
             console.warn('No se pudieron verificar alertas de tsunami NOAA');
         }
+    }
+};
+
+/* SERVICIO DE CLIMA */
+const WeatherService = {
+    currentData: null,
+    dailyData: null,
+    weatherCodes: {
+        0: 'Cielo despejado', 1: 'Mayormente despejado', 2: 'Parcialmente nublado', 3: 'Nublado',
+        45: 'Niebla', 48: 'Niebla escarchada', 51: 'Llovizna ligera', 53: 'Llovizna moderada', 55: 'Llovizna densa',
+        61: 'Lluvia ligera', 63: 'Lluvia moderada', 65: 'Lluvia fuerte', 71: 'Nieve ligera', 73: 'Nieve moderada',
+        75: 'Nieve fuerte', 95: 'Tormenta eléctrica'
+    },
+    getIcon: (code) => {
+        if (code <= 1) return 'fa-sun';
+        if (code <= 3) return 'fa-cloud-sun';
+        if (code === 45 || code === 48) return 'fa-smog';
+        if (code >= 51 && code <= 67) return 'fa-cloud-rain';
+        if (code >= 71 && code <= 77) return 'fa-snowflake';
+        if (code >= 95) return 'fa-cloud-bolt';
+        return 'fa-cloud';
+    },
+    fetchLocalWeather: async (lat, lng) => {
+        try {
+            const url = `${Config.WEATHER_API}?latitude=${lat}&longitude=${lng}&current_weather=true&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=auto`;
+            const res = await fetch(url);
+            const data = await res.json();
+            
+            if (data.current_weather) {
+                WeatherService.currentData = data.current_weather; 
+                WeatherService.dailyData = data.daily;
+                WeatherService.render(data.current_weather);
+            }
+        } catch (err) {
+            console.warn('[WeatherService] Error al obtener el clima:', err);
+        }
+    },
+    render: (weather) => {
+        let weatherEl = document.getElementById('weather-widget');
+        if (!weatherEl) {
+            weatherEl = document.createElement('button'); 
+            weatherEl.id = 'weather-widget';
+            weatherEl.setAttribute('aria-label', 'Ver detalles del clima');
+            weatherEl.style.cssText = 'cursor: pointer; display:flex; align-items:center; gap:6px; font-size:14px; font-weight:700; color:var(--text); background:var(--card); padding:8px 12px; border-radius:18px; border:1px solid var(--border); margin-left: auto; margin-right: 12px; transition: all 0.2s ease;';
+            
+            weatherEl.onclick = () => WeatherService.showDetails();
+            
+            const headerActions = document.querySelector('.header-actions');
+            if (headerActions) {
+                headerActions.parentNode.insertBefore(weatherEl, headerActions);
+            }
+        }
+        
+        weatherEl.innerHTML = `
+            <i class="fa-solid fa-temperature-half" style="color:var(--accent)"></i> 
+            ${Math.round(weather.temperature)}°C
+        `;
+    },
+    showDetails: () => {
+        if (!WeatherService.currentData) return;
+        const weather = WeatherService.currentData;
+        const daily = WeatherService.dailyData;
+        const modal = document.getElementById('weather-modal');
+        if (!modal) return;
+        
+        const desc = WeatherService.weatherCodes[weather.weathercode] || 'Condiciones variables';
+        
+        let weeklyHtml = '';
+        if (daily && daily.time) {
+            weeklyHtml = `<div style="margin-top: 24px; text-align: left; width: 100%;">
+                <div style="font-size: 11px; color: var(--muted); text-transform: uppercase; margin-bottom: 12px; font-weight: 700;">Pronóstico de la semana</div>
+                <style>.week-scroll::-webkit-scrollbar { display: none; }</style>
+                <div class="week-scroll" style="display: flex; flex-direction: row; gap: 10px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none;">`;
+            
+            for (let i = 0; i < daily.time.length; i++) {
+                const date = new Date(daily.time[i] + 'T00:00:00');
+                const dayName = i === 0 ? 'Hoy' : date.toLocaleDateString('es-ES', { weekday: 'short', timeZone: 'UTC' });
+                const max = Math.round(daily.temperature_2m_max[i]);
+                const min = Math.round(daily.temperature_2m_min[i]);
+                const iconClass = WeatherService.getIcon(daily.weathercode[i]);
+
+                weeklyHtml += `
+                    <div style="display: flex; flex-direction: column; align-items: center; padding: 12px 8px; background: var(--bg); border-radius: 12px; border: 1px solid var(--border); min-width: 68px; flex-shrink: 0; gap: 8px;">
+                        <div style="font-size: 13px; font-weight: 600; text-transform: capitalize; color: var(--text);">${dayName}</div>
+                        <div style="color: var(--accent); font-size: 18px;"><i class="fa-solid ${iconClass}"></i></div>
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 2px; font-family: var(--font-mono);">
+                            <span style="font-size: 14px; font-weight: 700; color: var(--text);">${max}°</span> 
+                            <span style="font-size: 12px; font-weight: 600; color: var(--muted);">${min}°</span>
+                        </div>
+                    </div>`;
+            }
+            weeklyHtml += `</div></div>`;
+        }
+        
+        modal.innerHTML = `
+            <div class="set-box" style="max-width: 360px; width: 100%;">
+                <div class="set-head">
+                    <div class="set-title">
+                        <i class="fa-solid fa-cloud-sun" aria-hidden="true"></i> Clima Local
+                    </div>
+                    <button class="set-close" onclick="WeatherService.close()" aria-label="Cerrar modal"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="set-body" style="padding: 24px; text-align: center; overflow-x: hidden;">
+                    <div style="font-size: 52px; font-weight: 800; color: var(--text); font-family: var(--font-mono); line-height: 1;">
+                        ${Math.round(weather.temperature)}°C
+                    </div>
+                    <div style="font-size: 15px; font-weight: 600; color: var(--accent); margin-top: 8px; margin-bottom: 24px; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ${desc}
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; text-align: left;">
+                        <div style="background: var(--bg); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
+                            <div style="font-size: 11px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Viento</div>
+                            <div style="font-size: 14px; font-weight: 700; color: var(--text);"><i class="fa-solid fa-wind" style="color: var(--muted)"></i> ${weather.windspeed} km/h</div>
+                        </div>
+                        <div style="background: var(--bg); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
+                            <div style="font-size: 11px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Dirección</div>
+                            <div style="font-size: 14px; font-weight: 700; color: var(--text);"><i class="fa-regular fa-compass" style="color: var(--muted)"></i> ${weather.winddirection}°</div>
+                        </div>
+                    </div>
+                    ${weeklyHtml}
+                </div>
+            </div>
+        `;
+        modal.classList.add('open');
+    },
+    close: () => {
+        const modal = document.getElementById('weather-modal');
+        if (modal) modal.classList.remove('open');
     }
 };
 
@@ -742,7 +866,6 @@ const AlertService = {
         },
         nearby: {
             class: 'eq-alert', 
-            // Dinámico: muestra el nombre de la zona favorita si existe, o "(GPS)"
             eyebrow: (eq) => eq.zoneName ? `CERCA DE: ${eq.zoneName.toUpperCase()}` : 'TERREMOTO CERCA (GPS)',
             title: (eq) => `M ${eq.label} a ${Utils.formatDistance(eq.distance)}`, sound: 'NEARBY',
             duration: 0, detail: 'Ver en mapa →',
@@ -764,7 +887,7 @@ const AlertService = {
         audio.volume = type === 'TSUNAMI' ? 0.8 : 0.5;
         audio.loop = loop;
         AlertService.sounds[type] = audio;
-        audio.play().catch(() => console.warn(`[Audio] ${type} bloqueado por el navegador`));
+        audio.play().catch(() => console.warn(`[Audio] bloqueado`));
         if (duration > 0) setTimeout(() => AlertService.stop(type), duration);
     },
     stop: (type) => {
@@ -785,7 +908,6 @@ const AlertService = {
         banner.setAttribute('aria-live', 'assertive');
         
         document.getElementById('ab-icon-wrap').innerHTML = isTsunami ? ICONS.tsunami : ICONS.earthquake;
-        
         document.getElementById('ab-eyebrow').textContent = typeof cfg.eyebrow === 'function' ? cfg.eyebrow(eq) : cfg.eyebrow;
         document.getElementById('ab-title').textContent = typeof cfg.title === 'function' ? cfg.title(eq) : cfg.title;
         document.getElementById('ab-msg').textContent = `${eq.place} · Prof. ${eq.depth.toFixed(0)} km`;
@@ -821,42 +943,35 @@ const AlertService = {
     }
 };
 
-/* SERVICIO DE ZONAS FAVORITAS (local) */
+/* SERVICIO DE ZONAS FAVORITAS */
 const FavoritesService = {
     load: async () => {
         try {
             const saved = await DBService.getSetting('favoriteZones');
             Store.favoriteZones = Array.isArray(saved) ? saved : [];
         } catch (err) {
-            console.warn('[FavoritesService] Error al cargar:', err);
             Store.favoriteZones = [];
         }
         FavoritesService.render();
     },
-
     persist: async () => {
         try {
             await DBService.saveSetting('favoriteZones', Store.favoriteZones);
         } catch (err) {
-            console.warn('[FavoritesService] Error al guardar:', err);
             Utils.showToast('No se pudo guardar la zona favorita');
         }
     },
-
     pending: [],
     pendingQuery: '',
-
     esc: (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
-
     add: async (name, lat, lng, address = '', precise = false) => {
-        const zone = { id: FavoritesService.uuid(), name, lat, lng, address, precise, synced: false };
+        const zone = { id: crypto.randomUUID?.() || Date.now().toString(), name, lat, lng, address, precise, synced: false };
         Store.favoriteZones.push(zone);
         await FavoritesService.persist();
         FavoritesService.render();
         Utils.showToast(`"${name}" agregada a zonas favoritas`);
         return zone;
     },
-
     remove: async (id) => {
         const zone = Store.favoriteZones.find(z => z.id === id);
         Store.favoriteZones = Store.favoriteZones.filter(z => z.id !== id);
@@ -864,7 +979,6 @@ const FavoritesService = {
         FavoritesService.render();
         if (zone) Utils.showToast(`"${zone.name}" eliminada`);
     },
-
     flyTo: (id) => {
         const zone = Store.favoriteZones.find(z => z.id === id);
         if (!zone || !MapService.instance) return;
@@ -872,18 +986,13 @@ const FavoritesService = {
         MapService.instance.flyTo([zone.lat, zone.lng], zoom, { animate: true, duration: 1.5 });
         SettingsService.close();
     },
-
     searchAndAdd: async () => {
         const query = document.getElementById('fav-search-city')?.value.trim();
-        if (!query) {
-            Utils.showToast('Escribe una dirección o ciudad');
-            return;
-        }
+        if (!query) return Utils.showToast('Escribe una dirección o ciudad');
+        
         const results = await MapService.searchAddress(query);
-        if (!results.length) {
-            Utils.showToast(`No se encontró "${query}"`);
-            return;
-        }
+        if (!results.length) return Utils.showToast(`No se encontró "${query}"`);
+        
         FavoritesService.pending = results;
         FavoritesService.pendingQuery = query;
         if (results.length === 1 && results[0].precise) {
@@ -892,21 +1001,17 @@ const FavoritesService = {
             FavoritesService.renderResults();
         }
     },
-
     renderResults: () => {
         const box = document.getElementById('fav-results');
         if (!box) return;
         const list = FavoritesService.pending;
         if (!list.length) { box.innerHTML = ''; return; }
-        const note = list[0].precise
-            ? 'Elige la ubicación correcta:'
-            : 'No se halló el número exacto; estas son ubicaciones aproximadas. Elige una:';
+        const note = list[0].precise ? 'Elige la ubicación correcta:' : 'Ubicaciones aproximadas. Elige una:';
         box.innerHTML = `<p class="fav-results-note">${note}</p>` + list.map((r, i) => `
             <button type="button" class="fav-result" onclick="FavoritesService.pick(${i})">
                 <i class="fa-solid fa-location-dot" aria-hidden="true"></i> ${FavoritesService.esc(r.label)}
             </button>`).join('');
     },
-
     pick: async (i) => {
         const r = FavoritesService.pending[i];
         if (!r) return;
@@ -914,21 +1019,13 @@ const FavoritesService = {
         const addrInput = document.getElementById('fav-search-city');
         const fallbackName = FavoritesService.pendingQuery.split(',')[0].trim() || r.label.split(',')[0];
         const zone = await FavoritesService.add(nameInput?.value.trim() || fallbackName, r.lat, r.lng, r.label, r.precise);
-        if (!r.precise) Utils.showToast('Ubicación aproximada (calle/colonia)');
+        if (!r.precise) Utils.showToast('Ubicación aproximada');
         FavoritesService.pending = [];
         FavoritesService.renderResults();
         if (nameInput) nameInput.value = '';
         if (addrInput) addrInput.value = '';
         FavoritesService.flyTo(zone.id);
     },
-
-    uuid: () => (crypto.randomUUID
-        ? crypto.randomUUID()
-        : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-            const r = Math.random() * 16 | 0;
-            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-        })),
-
     render: () => {
         const list = document.getElementById('fav-zones-list');
         if (list) {
@@ -944,30 +1041,24 @@ const FavoritesService = {
                                 ${z.address ? `<small>${FavoritesService.esc(z.address)}</small>` : ''}
                             </span>
                         </button>
-                        <button class="fav-zone-remove" onclick="FavoritesService.remove('${z.id}')" aria-label="Eliminar ${FavoritesService.esc(z.name)}">
+                        <button class="fav-zone-remove" onclick="FavoritesService.remove('${z.id}')" aria-label="Eliminar">
                             <i class="fa-solid fa-trash"></i>
                         </button>
-                    </div>
-                `).join('');
+                    </div>`).join('');
             }
         }
         FavoritesService.renderMapMarkers();
     },
-
     renderMapMarkers: () => {
         if (!MapService.instance) return;
-        if (!Store.favoriteMarkersLayer) {
-            Store.favoriteMarkersLayer = L.layerGroup().addTo(MapService.instance);
-        }
+        if (!Store.favoriteMarkersLayer) Store.favoriteMarkersLayer = L.layerGroup().addTo(MapService.instance);
         Store.favoriteMarkersLayer.clearLayers();
         Store.favoriteZones.forEach(zone => {
             const marker = L.marker([zone.lat, zone.lng], {
                 icon: L.divIcon({
                     className: '',
                     html: `<div class="fav-marker"><i class="fa-solid fa-star" aria-hidden="true"></i></div>`,
-                    iconSize: [30, 30],
-                    iconAnchor: [15, 30],
-                    popupAnchor: [0, -28]
+                    iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -28]
                 })
             });
             marker.bindPopup(`
@@ -980,7 +1071,6 @@ const FavoritesService = {
             Store.favoriteMarkersLayer.addLayer(marker);
         });
     },
-
     checkNearby: () => {
         if (!Store.favoriteZones.length) return;
         Store.favoriteZones.forEach((zone, idx) => {
@@ -995,155 +1085,12 @@ const FavoritesService = {
             if (Store.notifiedNearby[key]) return;
             Store.notifiedNearby[key] = true;
             const dist = Utils.calcDistance(zone.lat, zone.lng, strongest.lat, strongest.lng);
-            
-            // Pasamos el nombre de la zona a la alerta
             const eqForAlert = { ...strongest, distance: dist, zoneName: zone.name };
-            
             setTimeout(() => AlertService.show(eqForAlert, false, true), 1500 + idx * 9000);
         });
     }
 };
 
-const GEO_ERRORS = {
-    1: 'Permiso de ubicación denegado',
-    2: 'Información de ubicación no disponible',
-    3: 'Tiempo de espera agotado',
-    0: 'Error desconocido de ubicación'
-};
-
-/* SERVICIO DE CLIMA */
-/* SERVICIO DE CLIMA */
-const WeatherService = {
-    currentData: null,
-    dailyData: null, // Guardará el pronóstico de la semana
-    
-    // Diccionario de la Organización Meteorológica Mundial (WMO) en español
-    weatherCodes: {
-        0: 'Cielo despejado', 1: 'Mayormente despejado', 2: 'Parcialmente nublado', 3: 'Nublado',
-        45: 'Niebla', 48: 'Niebla escarchada', 51: 'Llovizna ligera', 53: 'Llovizna moderada', 55: 'Llovizna densa',
-        61: 'Lluvia ligera', 63: 'Lluvia moderada', 65: 'Lluvia fuerte', 71: 'Nieve ligera', 73: 'Nieve moderada',
-        75: 'Nieve fuerte', 95: 'Tormenta eléctrica'
-    },
-    
-    // Asigna un icono de FontAwesome basado en el código del clima
-    getIcon: (code) => {
-        if (code <= 1) return 'fa-sun';
-        if (code <= 3) return 'fa-cloud-sun';
-        if (code === 45 || code === 48) return 'fa-smog';
-        if (code >= 51 && code <= 67) return 'fa-cloud-rain';
-        if (code >= 71 && code <= 77) return 'fa-snowflake';
-        if (code >= 95) return 'fa-cloud-bolt';
-        return 'fa-cloud';
-    },
-
-    fetchLocalWeather: async (lat, lng) => {
-        try {
-            // Agregamos los parámetros 'daily' y 'timezone' para obtener la semana
-            const url = `${Config.WEATHER_API}?latitude=${lat}&longitude=${lng}&current_weather=true&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=auto`;
-            const res = await fetch(url);
-            const data = await res.json();
-            
-            if (data.current_weather) {
-                WeatherService.currentData = data.current_weather; 
-                WeatherService.dailyData = data.daily; // Guardamos los 7 días
-                WeatherService.render(data.current_weather);
-            }
-        } catch (err) {
-            console.warn('[WeatherService] Error al obtener el clima:', err);
-        }
-    },
-
-    render: (weather) => {
-        let weatherEl = document.getElementById('weather-widget');
-        if (!weatherEl) {
-            weatherEl = document.createElement('button'); 
-            weatherEl.id = 'weather-widget';
-            weatherEl.setAttribute('aria-label', 'Ver detalles del clima');
-            weatherEl.style.cssText = 'cursor: pointer; display:flex; align-items:center; gap:6px; font-size:14px; font-weight:700; color:var(--text); background:var(--card); padding:8px 12px; border-radius:18px; border:1px solid var(--border); margin-left: auto; margin-right: 12px; transition: all 0.2s ease;';
-            
-            weatherEl.onclick = () => WeatherService.showDetails();
-            
-            const headerActions = document.querySelector('.header-actions');
-            if (headerActions) {
-                headerActions.parentNode.insertBefore(weatherEl, headerActions);
-            }
-        }
-        
-        weatherEl.innerHTML = `
-            <i class="fa-solid fa-temperature-half" style="color:var(--accent)"></i> 
-            ${Math.round(weather.temperature)}°C
-        `;
-    },
-
-   showDetails: () => {
-        if (!WeatherService.currentData) return;
-        const weather = WeatherService.currentData;
-        const daily = WeatherService.dailyData;
-        const modal = document.getElementById('weather-modal');
-        if (!modal) return;
-        
-        const desc = WeatherService.weatherCodes[weather.weathercode] || 'Condiciones variables';
-        
-        let weeklyHtml = '';
-        if (daily && daily.time) {
-            weeklyHtml = `
-                <div class="weather-week-container">
-                    <div class="weather-week-title">Pronóstico de la semana</div>
-                    <div class="week-scroll">`;
-            
-            for (let i = 0; i < daily.time.length; i++) {
-                const date = new Date(daily.time[i] + 'T00:00:00');
-                const dayName = i === 0 ? 'Hoy' : date.toLocaleDateString('es-ES', { weekday: 'short', timeZone: 'UTC' });
-                const max = Math.round(daily.temperature_2m_max[i]);
-                const min = Math.round(daily.temperature_2m_min[i]);
-                const iconClass = WeatherService.getIcon(daily.weathercode[i]);
-
-                weeklyHtml += `
-                    <div class="day-card">
-                        <div class="day-name">${dayName}</div>
-                        <div class="day-icon"><i class="fa-solid ${iconClass}"></i></div>
-                        <div class="day-temps">
-                            <span class="day-max">${max}°</span>
-                            <span class="day-min">${min}°</span>
-                        </div>
-                    </div>`;
-            }
-            weeklyHtml += `</div></div>`;
-        }
-        
-        modal.innerHTML = `
-            <div class="set-box weather-content">
-                <div class="set-head">
-                    <div class="set-title">
-                        <i class="fa-solid fa-cloud-sun" aria-hidden="true"></i> Clima Local
-                    </div>
-                    <button class="set-close" onclick="WeatherService.close()" aria-label="Cerrar modal"><i class="fa-solid fa-xmark"></i></button>
-                </div>
-                <div class="set-body weather-body">
-                    <div class="weather-temp-main">${Math.round(weather.temperature)}°C</div>
-                    <div class="weather-desc">${desc}</div>
-                    <div class="weather-grid">
-                        <div class="weather-stat-card">
-                            <div class="weather-stat-label">Viento</div>
-                            <div class="weather-stat-val"><i class="fa-solid fa-wind" style="color: var(--muted)"></i> ${weather.windspeed} km/h</div>
-                        </div>
-                        <div class="weather-stat-card">
-                            <div class="weather-stat-label">Dirección</div>
-                            <div class="weather-stat-val"><i class="fa-regular fa-compass" style="color: var(--muted)"></i> ${weather.winddirection}°</div>
-                        </div>
-                    </div>
-                    ${weeklyHtml}
-                </div>
-            </div>
-        `;
-        modal.classList.add('open');
-    },
-
-    close: () => {
-        const modal = document.getElementById('weather-modal');
-        if (modal) modal.classList.remove('open');
-    }
-};
 /* SERVICIO DE GEOLOCALIZACIÓN */
 const LocationService = {
     locate: () => {
@@ -1157,25 +1104,19 @@ const LocationService = {
             (pos) => {
                 const { latitude: lat, longitude: lng, accuracy } = pos.coords;
                 Store.userLocation = { lat, lng };
-                Store.quakes.forEach(eq => {
-                    eq.distance = Utils.calcDistance(lat, lng, eq.lat, eq.lng);
-                });
+                Store.quakes.forEach(eq => { eq.distance = Utils.calcDistance(lat, lng, eq.lat, eq.lng); });
                 LocationService.renderUserMarker(lat, lng, accuracy);
-                if (MapService.instance) {
-                    MapService.instance.flyTo([lat, lng], 9, { animate: true, duration: 1.5 });
-                }
+                if (MapService.instance) MapService.instance.flyTo([lat, lng], 9, { animate: true, duration: 1.5 });
                 UIService.refreshView();
                 LocationService.checkNearby();
-                
                 WeatherService.fetchLocalWeather(lat, lng);
-                
                 Store.isLocating = false;
                 Utils.showToast(`Ubicación encontrada`);
                 Utils.announceToScreenReader('Ubicación actualizada');
             },
             (err) => {
                 Store.isLocating = false;
-                Utils.showToast(GEO_ERRORS[err.code] || 'Error al obtener ubicación');
+                Utils.showToast('Error al obtener ubicación');
             },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
         );
@@ -1186,36 +1127,25 @@ const LocationService = {
         if (Store.userMarker) map.removeLayer(Store.userMarker);
         if (Store.userAccuracyCircle) map.removeLayer(Store.userAccuracyCircle);
         Store.userAccuracyCircle = L.circle([lat, lng], {
-            radius: Math.max(acc, 30),
-            color: '#032b5c',
-            fillColor: '#60a5fa',
-            fillOpacity: 0.1,
-            weight: 1
+            radius: Math.max(acc, 30), color: '#032b5c', fillColor: '#60a5fa', fillOpacity: 0.1, weight: 1
         }).addTo(map);
         Store.userMarker = L.marker([lat, lng], {
             icon: L.divIcon({
-                className: '',
-                html: '<div class="pulse" role="img" aria-label="Tu ubicación"></div>',
-                iconSize: [16, 16],
-                iconAnchor: [8, 8]
-            }),
-            keyboard: false
+                className: '', html: '<div class="pulse" role="img" aria-label="Tu ubicación"></div>',
+                iconSize: [16, 16], iconAnchor: [8, 8]
+            }), keyboard: false
         }).addTo(map);
     },
     checkNearby: () => {
         if (!Store.userLocation) return;
         const nearby = Store.quakes.filter(eq =>
-            eq.distance <= Config.NEARBY_RADIUS_KM &&
-            eq.mag >= Config.ALERT.NEARBY_MIN_MAG &&
-            !Store.notifiedNearby[eq.id]
+            eq.distance <= Config.NEARBY_RADIUS_KM && eq.mag >= Config.ALERT.NEARBY_MIN_MAG && !Store.notifiedNearby[eq.id]
         );
         if (nearby.length > 0) {
             nearby.sort((a, b) => b.mag - a.mag);
             const strongest = nearby[0];
             Store.notifiedNearby[strongest.id] = true;
-            setTimeout(() => {
-                AlertService.show(strongest, false, true);
-            }, 1500);
+            setTimeout(() => { AlertService.show(strongest, false, true); }, 1500);
         }
     }
 };
@@ -1224,29 +1154,20 @@ const LocationService = {
 const TsunamiService = {
     show: (id) => {
         const eq = Store.quakes.find(q => q.id === id);
-        if (!eq) {
-            console.warn('[TsunamiService] Evento no encontrado:', id);
-            return;
-        }
+        if (!eq) return;
         const modal = document.getElementById('tsunami-modal');
-        if (!modal) {
-            console.error('[TsunamiService] Modal no existe en el DOM');
-            return;
-        }
+        if (!modal) return;
         modal.innerHTML = TsunamiService.render(eq);
         modal.classList.add('open');
         modal.setAttribute('role', 'dialog');
         modal.setAttribute('aria-modal', 'true');
-        requestAnimationFrame(() => {
-            modal.querySelector('.tsm-close')?.focus();
-        });
+        requestAnimationFrame(() => modal.querySelector('.tsm-close')?.focus());
     },
     render: (eq) => `
         <div class="tsm-box">
             <div class="tsm-head">
                 <div class="tsm-title">
-                    <i class="fa-solid fa-house-tsunami" aria-hidden="true"></i> 
-                    Boletín de Alerta
+                    <i class="fa-solid fa-house-tsunami" aria-hidden="true"></i> Boletín de Alerta
                 </div>
                 <button class="tsm-close" onclick="TsunamiService.close()" aria-label="Cerrar modal"><i class="fa-solid fa-xmark"></i></button>
             </div>
@@ -1258,14 +1179,8 @@ const TsunamiService = {
                 <div class="tsm-section">
                     <h3>Datos del Evento</h3>
                     <div class="tsm-grid">
-                        <div class="tsm-item">
-                            <div class="tsm-label">Magnitud</div>
-                            <div class="tsm-val" style="color:${eq.color}">M ${eq.label}</div>
-                        </div>
-                        <div class="tsm-item">
-                            <div class="tsm-label">Profundidad</div>
-                            <div class="tsm-val">${eq.depth.toFixed(0)} km</div>
-                        </div>
+                        <div class="tsm-item"><div class="tsm-label">Magnitud</div><div class="tsm-val" style="color:${eq.color}">M ${eq.label}</div></div>
+                        <div class="tsm-item"><div class="tsm-label">Profundidad</div><div class="tsm-val">${eq.depth.toFixed(0)} km</div></div>
                     </div>
                 </div>
                 <div class="tsm-actions">
@@ -1277,10 +1192,7 @@ const TsunamiService = {
     `,
     close: () => {
         const modal = document.getElementById('tsunami-modal');
-        if (!modal) return;
-        modal.classList.remove('open');
-        modal.removeAttribute('role');
-        modal.removeAttribute('aria-modal');
+        if (modal) { modal.classList.remove('open'); modal.removeAttribute('role'); modal.removeAttribute('aria-modal'); }
     }
 };
 
@@ -1292,20 +1204,12 @@ const BottomSheet = {
         const handle = document.getElementById('sheet-handle');
         if (!sheet || !handle) return;
         let startY, currentY, pendingFrame = null;
-        handle.addEventListener('touchstart', e => {
-            startY = e.touches[0].clientY;
-            sheet.style.transition = 'none';
-        }, { passive: true });
+        handle.addEventListener('touchstart', e => { startY = e.touches[0].clientY; sheet.style.transition = 'none'; }, { passive: true });
         handle.addEventListener('touchmove', e => {
             currentY = e.touches[0].clientY;
             const diff = startY - currentY;
-            const max = -window.innerHeight * 0.75;
-            const clamped = Math.max(max, Math.min(0, diff));
-            if (pendingFrame) return;
-            pendingFrame = requestAnimationFrame(() => {
-                sheet.style.transform = `translateY(${clamped}px)`;
-                pendingFrame = null;
-            });
+            const clamped = Math.max(-window.innerHeight * 0.75, Math.min(0, diff));
+            if (!pendingFrame) pendingFrame = requestAnimationFrame(() => { sheet.style.transform = `translateY(${clamped}px)`; pendingFrame = null; });
         }, { passive: true });
         handle.addEventListener('touchend', () => {
             sheet.style.transition = 'transform 0.3s';
@@ -1313,17 +1217,9 @@ const BottomSheet = {
             const h = window.innerHeight;
             BottomSheet.set(y < -h * 0.5 ? 'expanded' : y < -h * 0.2 ? 'half' : 'collapsed');
         });
-        document.getElementById('sheet-header')?.addEventListener('click', e => {
-            if (!e.target.closest('button')) BottomSheet.toggle();
-        });
-        document.addEventListener('keydown', e => {
-            if (e.key === 'Escape') BottomSheet.collapse();
-        });
-        document.addEventListener('pointerdown', e => {
-            if (BottomSheet.state === 'collapsed') return;
-            if (sheet.contains(e.target)) return;
-            BottomSheet.collapse();
-        });
+        document.getElementById('sheet-header')?.addEventListener('click', e => { if (!e.target.closest('button')) BottomSheet.toggle(); });
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') BottomSheet.collapse(); });
+        document.addEventListener('pointerdown', e => { if (BottomSheet.state !== 'collapsed' && !sheet.contains(e.target)) BottomSheet.collapse(); });
     },
     toggle: () => BottomSheet.set(BottomSheet.state === 'collapsed' ? 'expanded' : 'collapsed'),
     collapse: () => BottomSheet.set('collapsed'),
@@ -1341,20 +1237,13 @@ const BottomSheet = {
 /* SERVICIO DE AJUSTES DEL USUARIO */
 const SettingsService = {
     KEY: 'userPrefs',
-    DEFAULTS: {
-        nearbyRadiusKm: Config.NEARBY_RADIUS_KM,
-        alertThreshold: Config.ALERT.HIGH_THRESHOLD,
-        distanceUnit: Config.DISTANCE_UNIT,
-        soundEnabled: Config.SOUND_ENABLED
-    },
+    DEFAULTS: { nearbyRadiusKm: Config.NEARBY_RADIUS_KM, alertThreshold: Config.ALERT.HIGH_THRESHOLD, distanceUnit: Config.DISTANCE_UNIT, soundEnabled: Config.SOUND_ENABLED },
     load: async () => {
         let prefs = SettingsService.DEFAULTS;
         try {
             const saved = await DBService.getSetting(SettingsService.KEY);
             if (saved) prefs = { ...SettingsService.DEFAULTS, ...saved };
-        } catch (err) {
-            console.warn('[SettingsService] No se pudieron cargar los ajustes:', err);
-        }
+        } catch (err) {}
         SettingsService.apply(prefs);
         SettingsService.populateForm(prefs);
     },
@@ -1379,27 +1268,16 @@ const SettingsService = {
         if (sound) sound.checked = prefs.soundEnabled;
     },
     save: async (patch) => {
-        const current = {
-            nearbyRadiusKm: Config.NEARBY_RADIUS_KM,
-            alertThreshold: Config.ALERT.HIGH_THRESHOLD,
-            distanceUnit: Config.DISTANCE_UNIT,
-            soundEnabled: Config.SOUND_ENABLED
-        };
-        const merged = { ...current, ...patch };
+        const merged = { nearbyRadiusKm: Config.NEARBY_RADIUS_KM, alertThreshold: Config.ALERT.HIGH_THRESHOLD, distanceUnit: Config.DISTANCE_UNIT, soundEnabled: Config.SOUND_ENABLED, ...patch };
         SettingsService.apply(merged);
-        try {
-            await DBService.saveSetting(SettingsService.KEY, merged);
-            Utils.showToast('Ajustes guardados');
-        } catch (err) {
-            console.warn('[SettingsService] No se pudieron guardar los ajustes:', err);
-            Utils.showToast('No se pudo guardar el ajuste');
-        }
+        try { await DBService.saveSetting(SettingsService.KEY, merged); Utils.showToast('Ajustes guardados'); } 
+        catch (err) { Utils.showToast('No se pudo guardar el ajuste'); }
     },
     open: () => document.getElementById('settings-modal')?.classList.add('open'),
     close: () => document.getElementById('settings-modal')?.classList.remove('open')
 };
 
-/* SERVICIO DE CONEXIÓN (estado online/offline + Background Sync) */
+/* SERVICIO DE CONEXIÓN */
 const ConnectionService = {
     init: () => {
         Store.isOnline = navigator.onLine;
@@ -1424,13 +1302,7 @@ const ConnectionService = {
         el.classList.toggle('offline', !Store.isOnline);
         const icon = el.querySelector('i');
         if (icon) icon.className = Store.isOnline ? 'fa-solid fa-wifi' : 'fa-solid fa-wifi-slash';
-        if (!Store.isOnline) {
-            txt.textContent = 'Sin conexión';
-        } else if (Store.lastFetchTime) {
-            txt.textContent = `Actualizado ${Utils.timeAgo(Store.lastFetchTime)}`;
-        } else {
-            txt.textContent = 'En línea';
-        }
+        txt.textContent = !Store.isOnline ? 'Sin conexión' : (Store.lastFetchTime ? `Actualizado ${Utils.timeAgo(Store.lastFetchTime)}` : 'En línea');
     },
     requestBackgroundSync: async () => {
         try {
@@ -1438,41 +1310,47 @@ const ConnectionService = {
                 const reg = await navigator.serviceWorker.ready;
                 await reg.sync.register('sync-earthquakes');
             }
-        } catch (err) {
-            console.warn('[ConnectionService] Background Sync no disponible:', err);
-        }
+        } catch (err) {}
     }
 };
 
-/* Inicialización */
+/* INICIALIZACIÓN OPTIMIZADA DE CARGA RÁPIDA */
 document.addEventListener('DOMContentLoaded', async () => {
-    await DBService.init?.().catch(err => console.warn('[DB] Error:', err));
-    const theme = localStorage.getItem('theme') || 'dark';
-    document.documentElement.setAttribute('data-theme', theme);
+    // 1. Tareas Críticas (Visuales y de base de datos)
     MapService.init();
     BottomSheet.init();
     UIService.initDelegation();
-    AlertService.init();
-    ConnectionService.init();
+    await DBService.init?.().catch(err => console.warn('[DB] Error:', err));
+    
+    // 2. Pintar datos de la caché instantáneamente (Acelera la percepción de carga)
+    const hasCache = await DataService.loadCachedFirst();
+    if (hasCache) SpinnerService.hide();
 
+    // Failsafe del spinner
     setTimeout(() => {
         if (!SpinnerService.hidden) {
             SpinnerService.hide();
-            Utils.showToast('La carga está tardando más de lo normal. Revisa tu conexión.');
+            Utils.showToast('La red está lenta. Mostrando mapa base.');
         }
-    }, 12000);
+    }, 8000);
 
-    SettingsService.load().catch(err => console.warn('[Settings] Error:', err));
-    FavoritesService.load().catch(err => console.warn('[Favorites] Error:', err));
+    // 3. Tareas en segundo plano (No bloquean el hilo visual principal)
+    setTimeout(() => {
+        DataService.fetchQuakes();
+        DataService.startAutoRefresh();
+        DataService.fetchActiveTsunamiAlerts(); 
+        
+        ConnectionService.init();
+        SettingsService.load().catch(() => {});
+        FavoritesService.load().catch(() => {});
+        AlertService.init();
+        
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    }, 150); // Pequeño respiro al procesador
 
-    if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
-    }
-    DataService.loadCachedFirst();
-    DataService.fetchQuakes();
-    DataService.startAutoRefresh();
-    DataService.fetchActiveTsunamiAlerts(); 
-
+    // Métodos globales accesibles desde el HTML
     Object.assign(window, {
         toggleTheme: () => {
             const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
@@ -1486,6 +1364,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         toggleSheet: BottomSheet.toggle,
         toggleFilters: () => document.getElementById('navbar')?.classList.toggle('show'),
     });
+    
     window.addEventListener('pagehide', () => {
         Object.values(Store.timers).forEach(timer => timer && clearTimeout(timer));
         AlertService.stopAll();
