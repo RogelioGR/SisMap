@@ -1,7 +1,6 @@
 "use strict";
 
 const Utils = {
-    // Seguridad: Sanitización estricta de inputs para prevenir XSS
     sanitize: (str) => {
         if (!str) return '';
         const div = document.createElement('div');
@@ -632,9 +631,12 @@ const DataService = {
                 });
             }
             
-            const changed = newQuakes.length !== Store.quakes.length || newQuakes[0]?.id !== Store.quakes[0]?.id;
-            if (changed) {
-                DBService.saveQuakes(newQuakes).catch(err => console.warn('[DB] Caché falló:', err));
+            // Limpiar y guardar SIEMPRE en la base de datos local para tener los datos más frescos offline
+            try {
+                await DBService.clearQuakes();
+                await DBService.saveQuakes(newQuakes);
+            } catch (err) {
+                console.warn('[DB] Error al guardar para modo offline:', err);
             }
             
             if (!Store.isFirstLoad) {
@@ -667,11 +669,13 @@ const DataService = {
         }
     },
     checkForAlerts: (newQuakes) => {
+        if (Store.userLocation) return; // El GPS se encarga de esto en LocationService
+        
         const novelty = newQuakes.filter(q => !Store.knownIds[q.id]);
         if (novelty.length > 0) {
             novelty.sort((a, b) => b.mag - a.mag);
             const biggest = novelty[0];
-            if (biggest.isHigh || biggest.tsunami) {
+            if (biggest.mag >= 4.0 || biggest.tsunami) {
                 AlertService.show(biggest, biggest.tsunami, false);
             }
         }
@@ -847,10 +851,11 @@ const WeatherService = {
     }
 };
 
-/* SERVICIO DE ALERTAS */
+/* SERVICIO DE ALERTAS (CORREGIDO AUDIO, VIBRACIÓN E ÍCONO) */
 const AlertService = {
     sounds: {},
     pool: {},
+    vibrateInterval: null,
     init: () => {
         Object.entries(Config.AUDIO).forEach(([key, url]) => {
             const audio = new Audio(url);
@@ -862,70 +867,97 @@ const AlertService = {
         tsunami: {
             class: 'ts-alert', eyebrow: 'ALERTA DE TSUNAMI',
             title: '¡Potencial tsunami detectado!', sound: 'TSUNAMI',
-            duration: 15000, detail: 'Ver boletín completo →',
-            action: (eq) => TsunamiService.show(eq.id), notify: 'ALERTA TSUNAMI'
+            duration: 15000, 
+            detail: '<i class="fa-solid fa-person-running"></i> Trazar ruta de evacuación',
+            action: (eq) => EvacuationService.drawRoute(eq.lat, eq.lng),
+            notify: 'ALERTA TSUNAMI', fullscreen: true
         },
-        nearby: {
+        emergency: { 
             class: 'eq-alert', 
-            eyebrow: (eq) => eq.zoneName ? `CERCA DE: ${eq.zoneName.toUpperCase()}` : 'TERREMOTO CERCA (GPS)',
+            eyebrow: (eq) => eq.zoneName ? `¡PELIGRO CERCA DE ${eq.zoneName.toUpperCase()}!` : '¡TERREMOTO MUY CERCA!',
             title: (eq) => `M ${eq.label} a ${Utils.formatDistance(eq.distance)}`, sound: 'NEARBY',
-            duration: 0, detail: 'Ver en mapa →',
-            action: (eq) => UIService.flyToQuake(eq), 
-            notify: (eq) => eq.zoneName ? `Sismo cerca de ${eq.zoneName}` : 'Sismo Cercano'
+            duration: 0, 
+            detail: '<i class="fa-solid fa-person-running"></i> Trazar ruta de evacuación',
+            action: (eq) => EvacuationService.drawRoute(eq.lat, eq.lng),
+            notify: (eq) => eq.zoneName ? `Sismo cerca de ${eq.zoneName}` : 'Sismo Cercano',
+            fullscreen: true
         },
-        high: {
-            class: 'eq-alert', eyebrow: 'SISMO DE ALTA MAGNITUD',
-            title: (eq) => `Magnitud M ${eq.label} registrada`, sound: 'EARTHQUAKE',
-            duration: 10000, detail: 'Ver en mapa →',
-            action: (eq) => UIService.flyToQuake(eq), notify: 'Sismo Fuerte'
+        standard: { 
+            class: 'eq-alert', eyebrow: 'SISMO DETECTADO',
+            title: (eq) => `Magnitud M ${eq.label}`, 
+            sound: 'notify',
+            duration: 8000, detail: 'Ver en mapa →',
+            action: (eq) => UIService.flyToQuake(eq), notify: 'Sismo Fuerte', fullscreen: false
         }
     },
     play: (type, loop = false, duration = 0) => {
-        AlertService.stop(type);
-        if (!Config.SOUND_ENABLED) return;
-        const base = AlertService.pool[type] || AlertService.pool.EARTHQUAKE;
-        const audio = base ? base.cloneNode(true) : new Audio(Config.AUDIO[type] || Config.AUDIO.EARTHQUAKE);
-        audio.volume = type === 'TSUNAMI' ? 0.8 : 0.5;
-        audio.loop = loop;
-        AlertService.sounds[type] = audio;
-        audio.play().catch(() => console.warn(`[Audio] bloqueado`));
-        if (duration > 0) setTimeout(() => AlertService.stop(type), duration);
-    },
+    AlertService.stopAll(); 
+    if (!Config.SOUND_ENABLED) return;
+    
+    const audio = AlertService.pool[type] || AlertService.pool.EARTHQUAKE;
+    if (!audio) return;
+
+    audio.currentTime = 0;
+    audio.volume = 1.0; 
+    audio.loop = loop;
+    
+    audio.play().catch(e => console.warn('[Audio] bloqueado por el navegador', e));
+    AlertService.sounds[type] = audio;
+
+    if (navigator.vibrate) {
+        clearInterval(AlertService.vibrateInterval);
+        if (loop) {
+            // Alarma de Emergencia: Vibración fuerte y en bucle
+            navigator.vibrate([1000, 500, 1000, 500, 2000]); 
+            AlertService.vibrateInterval = setInterval(() => {
+                navigator.vibrate([1000, 500, 1000, 500, 2000]);
+            }, 5000);
+        } else {
+            // Notificación Estándar: Vibración corta y discreta
+            navigator.vibrate([200, 100, 200]);
+        }
+    }
+
+    if (duration > 0) setTimeout(() => AlertService.stop(type), duration);
+},
     stop: (type) => {
         if (AlertService.sounds[type]) {
             AlertService.sounds[type].pause();
-            AlertService.sounds[type] = null;
+            AlertService.sounds[type].currentTime = 0;
         }
     },
-    stopAll: () => Object.keys(AlertService.sounds).forEach(k => AlertService.stop(k)),
-    show: (eq, isTsunami, isNearby) => {
-        if (!isTsunami && !isNearby && !eq.isHigh) return;
+    stopAll: () => {
+        Object.keys(AlertService.pool).forEach(k => AlertService.stop(k));
+        if (navigator.vibrate) {
+            clearInterval(AlertService.vibrateInterval);
+            navigator.vibrate(0);
+        }
+    },
+    show: (eq, isTsunami, isEmergency) => {
+        if (!isTsunami && !isEmergency && eq.mag < 4.0) return; 
+        
         AlertService.stopAll();
         const banner = document.getElementById('alert-banner');
         if (!banner) return;
-        const cfg = AlertService._config[isTsunami ? 'tsunami' : isNearby ? 'nearby' : 'high'];
-        banner.className = `${cfg.class} show`;
-        banner.setAttribute('role', 'alert');
-        banner.setAttribute('aria-live', 'assertive');
         
+        const cfg = AlertService._config[isTsunami ? 'tsunami' : isEmergency ? 'emergency' : 'standard'];
+        
+        banner.className = `${cfg.class} show ${cfg.fullscreen ? 'fullscreen-alert' : ''}`;
         document.getElementById('ab-icon-wrap').innerHTML = isTsunami ? ICONS.tsunami : ICONS.earthquake;
         document.getElementById('ab-eyebrow').textContent = typeof cfg.eyebrow === 'function' ? cfg.eyebrow(eq) : cfg.eyebrow;
         document.getElementById('ab-title').textContent = typeof cfg.title === 'function' ? cfg.title(eq) : cfg.title;
         document.getElementById('ab-msg').textContent = `${eq.place} · Prof. ${eq.depth.toFixed(0)} km`;
         
         const detEl = document.getElementById('ab-detail');
-        detEl.textContent = cfg.detail;
+        detEl.innerHTML = cfg.detail; 
         detEl.onclick = () => { cfg.action(eq); AlertService.hide(); };
         
-        const progress = document.getElementById('ab-progress');
-        if (progress) {
-            progress.style.animation = 'none';
-            progress.offsetHeight;
-            progress.style.animation = 'ab-shrink 8000ms linear forwards';
+        if (cfg.fullscreen) {
+            AlertService.play(cfg.sound, true, 0); 
+        } else {
+            Store.timers.alert = setTimeout(() => AlertService.hide(), 8000);
+            AlertService.play(cfg.sound, false, 8000);
         }
-        clearTimeout(Store.timers.alert);
-        Store.timers.alert = setTimeout(() => AlertService.hide(), 8000);
-        AlertService.play(cfg.sound, false, cfg.duration || 8000);
         
         if ('Notification' in window && Notification.permission === 'granted') {
             const notifyText = typeof cfg.notify === 'function' ? cfg.notify(eq) : cfg.notify;
@@ -958,9 +990,9 @@ const AlertService = {
     }
 };
 
-/* SERVICIO DE RUTAS DE EVACUACIÓN (OSRM) */
+/* SERVICIO DE RUTAS DE EVACUACIÓN (OSRM) - MULTIRUTA NATIVA */
 const EvacuationService = {
-    routeLayer: null,
+    routeLayers: [],
     calculateSafePoint: (userLat, userLng, eqLat, eqLng) => {
         const dy = userLat - eqLat;
         const dx = userLng - eqLng;
@@ -973,33 +1005,56 @@ const EvacuationService = {
     },
     drawRoute: async (eqLat, eqLng) => {
         if (!Store.userLocation) {
-            Utils.showToast('Se requiere tu ubicación GPS para trazar la ruta');
+            Utils.showToast('Se requiere tu ubicación GPS para trazar rutas de evacuación');
             return;
         }
-        Utils.showToast('Calculando ruta a terreno seguro...');
+        Utils.showToast('Calculando opciones de rutas seguras...');
         
         const start = Store.userLocation;
         const end = EvacuationService.calculateSafePoint(start.lat, start.lng, eqLat, eqLng);
         
+        EvacuationService.routeLayers.forEach(layer => {
+            if (MapService.instance) MapService.instance.removeLayer(layer);
+        });
+        EvacuationService.routeLayers = [];
+        
+        const routeStyles = [
+            { color: '#3b82f6', weight: 8, opacity: 1, dashArray: '10, 12' }, 
+            { color: '#10b981', weight: 5, opacity: 0.9, dashArray: '5, 8' }, 
+            { color: '#f59e0b', weight: 5, opacity: 0.9, dashArray: '5, 8' }  
+        ];
+
         try {
-            const res = await fetch(`https://router.project-osrm.org/route/v1/foot/${start.lng},${start.lat};${end.lng},${end.lat}?geometries=geojson`);
+            const res = await fetch(`https://router.project-osrm.org/route/v1/foot/${start.lng},${start.lat};${end.lng},${end.lat}?alternatives=3&geometries=geojson`);
             const data = await res.json();
             
             if (data.routes && data.routes.length > 0) {
-                const routeCoords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
-                
-                if (EvacuationService.routeLayer && MapService.instance) {
-                    MapService.instance.removeLayer(EvacuationService.routeLayer);
-                }
-                
-                EvacuationService.routeLayer = L.polyline(routeCoords, {
-                    color: '#3b82f6', weight: 6, dashArray: '10, 12', lineCap: 'round'
-                }).addTo(MapService.instance);
-                
-                MapService.instance.fitBounds(EvacuationService.routeLayer.getBounds(), { padding: [40, 40] });
+                let validBounds = new L.latLngBounds();
+
+                data.routes.forEach((route, index) => {
+                    if (index >= routeStyles.length) return; 
+                    
+                    const routeCoords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+                    const style = routeStyles[index];
+                    
+                    const layer = L.polyline(routeCoords, {
+                        color: style.color, 
+                        weight: style.weight, 
+                        opacity: style.opacity,
+                        dashArray: style.dashArray, 
+                        lineCap: 'round'
+                    }).addTo(MapService.instance);
+                    
+                    EvacuationService.routeLayers.push(layer);
+                    validBounds.extend(layer.getBounds());
+                });
+
+                MapService.instance.fitBounds(validBounds, { padding: [40, 40] });
                 TsunamiService.close();
                 BottomSheet.collapse();
-                Utils.showToast('Sigue la ruta punteada azul hacia terreno seguro', 5000);
+                Utils.showToast(`Se trazaron ${data.routes.length} opciones de evacuación.`, 6000);
+            } else {
+                Utils.showToast('No se encontraron rutas peatonales seguras');
             }
         } catch (err) {
             console.warn('[Evacuation] Error:', err);
@@ -1144,19 +1199,19 @@ const FavoritesService = {
     checkNearby: () => {
         if (!Store.favoriteZones.length) return;
         Store.favoriteZones.forEach((zone, idx) => {
-            const nearby = Store.quakes.filter(eq => {
-                const d = Utils.calcDistance(zone.lat, zone.lng, eq.lat, eq.lng);
-                return d <= Config.NEARBY_RADIUS_KM && eq.mag >= Config.ALERT.NEARBY_MIN_MAG;
-            });
-            if (nearby.length === 0) return;
-            nearby.sort((a, b) => b.mag - a.mag);
-            const strongest = nearby[0];
-            const key = `${zone.id}:${strongest.id}`;
-            if (Store.notifiedNearby[key]) return;
-            Store.notifiedNearby[key] = true;
-            const dist = Utils.calcDistance(zone.lat, zone.lng, strongest.lat, strongest.lng);
-            const eqForAlert = { ...strongest, distance: dist, zoneName: zone.name };
-            setTimeout(() => AlertService.show(eqForAlert, false, true), 1500 + idx * 9000);
+            const unnotified = Store.quakes.filter(eq => !Store.notifiedNearby[`${zone.id}:${eq.id}`]);
+            if (unnotified.length === 0) return;
+
+            unnotified.forEach(eq => Store.notifiedNearby[`${zone.id}:${eq.id}`] = true);
+            const emergencies = unnotified.filter(eq => Utils.calcDistance(zone.lat, zone.lng, eq.lat, eq.lng) <= 400);
+            
+            if (emergencies.length > 0) {
+                emergencies.sort((a, b) => b.mag - a.mag);
+                const strongest = emergencies[0];
+                const dist = Utils.calcDistance(zone.lat, zone.lng, strongest.lat, strongest.lng);
+                const eqForAlert = { ...strongest, distance: dist, zoneName: zone.name };
+                setTimeout(() => AlertService.show(eqForAlert, false, true), 1500 + idx * 2000);
+            }
         });
     }
 };
@@ -1208,14 +1263,20 @@ const LocationService = {
     },
     checkNearby: () => {
         if (!Store.userLocation) return;
-        const nearby = Store.quakes.filter(eq =>
-            eq.distance <= Config.NEARBY_RADIUS_KM && eq.mag >= Config.ALERT.NEARBY_MIN_MAG && !Store.notifiedNearby[eq.id]
-        );
-        if (nearby.length > 0) {
-            nearby.sort((a, b) => b.mag - a.mag);
-            const strongest = nearby[0];
-            Store.notifiedNearby[strongest.id] = true;
-            setTimeout(() => { AlertService.show(strongest, false, true); }, 1500);
+        const unnotified = Store.quakes.filter(eq => !Store.notifiedNearby[eq.id]);
+        if (unnotified.length === 0) return;
+
+        unnotified.forEach(eq => Store.notifiedNearby[eq.id] = true);
+
+        const emergencies = unnotified.filter(eq => eq.distance !== null && eq.distance <= 400);
+        const standards = unnotified.filter(eq => (eq.distance === null || eq.distance > 400) && eq.mag >= 4.0);
+
+        if (emergencies.length > 0) {
+            emergencies.sort((a, b) => b.mag - a.mag); 
+            setTimeout(() => { AlertService.show(emergencies[0], emergencies[0].tsunami, true); }, 1500);
+        } else if (standards.length > 0) {
+            standards.sort((a, b) => b.mag - a.mag); 
+            setTimeout(() => { AlertService.show(standards[0], standards[0].tsunami, false); }, 1500);
         }
     }
 };
@@ -1309,7 +1370,7 @@ const BottomSheet = {
 /* SERVICIO DE AJUSTES DEL USUARIO */
 const SettingsService = {
     KEY: 'userPrefs',
-    DEFAULTS: { nearbyRadiusKm: Config.NEARBY_RADIUS_KM, alertThreshold: Config.ALERT.HIGH_THRESHOLD, distanceUnit: Config.DISTANCE_UNIT, soundEnabled: Config.SOUND_ENABLED },
+    DEFAULTS: { soundEnabled: true }, 
     load: async () => {
         let prefs = SettingsService.DEFAULTS;
         try {
@@ -1320,27 +1381,14 @@ const SettingsService = {
         SettingsService.populateForm(prefs);
     },
     apply: (prefs) => {
-        Config.NEARBY_RADIUS_KM = prefs.nearbyRadiusKm;
-        Config.ALERT.HIGH_THRESHOLD = prefs.alertThreshold;
-        Config.DISTANCE_UNIT = prefs.distanceUnit;
         Config.SOUND_ENABLED = prefs.soundEnabled;
-        if (Store.quakes.length) {
-            Store.quakes.forEach(eq => { eq.isHigh = eq.mag >= Config.ALERT.HIGH_THRESHOLD; });
-            UIService.refreshView();
-        }
     },
     populateForm: (prefs) => {
-        const radius = document.getElementById('set-radius');
-        const threshold = document.getElementById('set-threshold');
-        const unit = document.getElementById('set-unit');
         const sound = document.getElementById('set-sound');
-        if (radius) radius.value = String(prefs.nearbyRadiusKm);
-        if (threshold) threshold.value = String(prefs.alertThreshold);
-        if (unit) unit.value = prefs.distanceUnit;
         if (sound) sound.checked = prefs.soundEnabled;
     },
     save: async (patch) => {
-        const merged = { nearbyRadiusKm: Config.NEARBY_RADIUS_KM, alertThreshold: Config.ALERT.HIGH_THRESHOLD, distanceUnit: Config.DISTANCE_UNIT, soundEnabled: Config.SOUND_ENABLED, ...patch };
+        const merged = { soundEnabled: Config.SOUND_ENABLED, ...patch };
         SettingsService.apply(merged);
         try { await DBService.saveSetting(SettingsService.KEY, merged); Utils.showToast('Ajustes guardados'); } 
         catch (err) { Utils.showToast('No se pudo guardar el ajuste'); }

@@ -4,14 +4,15 @@ const ENV = {
     CARTO_API_KEY: 'cb1_2xn4_1_038a5c68ca6fbbb0ca36839f',
     USGS_API_URL: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson',
     EMSC_API_URL: 'https://www.seismicportal.eu/fdsnws/event/1/query?format=json&limit=50',
-    WEATHER_API: 'https://api.open-meteo.com/v1/forecast'
+    WEATHER_API: 'https://api.open-meteo.com/v1/forecast',
+    SISMO_API_URL: '/mock-quake.json'
 };
 
 const Config = {
     API_URL: ENV.USGS_API_URL,
-    API_URL_2: ENV.EMSC_API_URL,
+    API_URL_2: ENV.EMSC_API_URL, 
     WEATHER_API: ENV.WEATHER_API,
-    REFRESH_INTERVAL: 60,
+    REFRESH_INTERVAL: 30,
     NEARBY_RADIUS_KM: 1500,
     MAX_RETRY_ATTEMPTS: 3,
     RETRY_DELAY: 1000,
@@ -30,9 +31,10 @@ const Config = {
         TSUNAMI_BORDER: '#fca5a5'
     },
     AUDIO: {
-        EARTHQUAKE: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3',
-        TSUNAMI: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3',
-        NEARBY: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'
+        EARTHQUAKE: 'https://actions.google.com/sounds/v1/alarms/spaceship_alarm.ogg',
+        TSUNAMI: 'https://actions.google.com/sounds/v1/alarms/spaceship_alarm.ogg',
+        NEARBY: 'https://actions.google.com/sounds/v1/alarms/spaceship_alarm.ogg',
+        notify: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'
     },
     MAP: {
         DEFAULT_CENTER: [20, -30],

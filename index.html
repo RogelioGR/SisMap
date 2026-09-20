@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#0a0a0a">
-    <meta name="description" content="Mapa sísmico en tiempo real con alertas de tsunami, rutas de evacuación y clima local.">
-    
-<!-- 1. SEGURIDAD: Content Security Policy (CSP) previene ataques XSS e inyecciones de código -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://earthquake.usgs.gov https://www.seismicportal.eu https://api.open-meteo.com https://api.weather.gov https://nominatim.openstreetmap.org https://router.project-osrm.org; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://basemaps.cartocdn.com https://earthquake.usgs.gov; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' data: https://cdnjs.cloudflare.com https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; media-src 'self' https://assets.mixkit.co;">
+    <meta name="description"
+        content="Mapa sísmico en tiempo real con alertas de tsunami, rutas de evacuación y clima local.">
+
+    <meta http-equiv="Content-Security-Policy"content="default-src 'self'; connect-src 'self' https://earthquake.usgs.gov https://www.seismicportal.eu https://api.open-meteo.com https://api.weather.gov https://nominatim.openstreetmap.org https://router.project-osrm.org; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://basemaps.cartocdn.com https://earthquake.usgs.gov; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' data: https://cdnjs.cloudflare.com https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; media-src 'self' https://assets.mixkit.co https://actions.google.com;">
     <link rel="preconnect" href="https://earthquake.usgs.gov">
     <link rel="preconnect" href="https://api.open-meteo.com">
     <link rel="preconnect" href="https://basemaps.cartocdn.com">
@@ -15,12 +16,15 @@
     <title>SisMap</title>
     <link rel="icon" type="image/png" href="./assets/iconoApp.png">
     <link rel="manifest" href="./manifest.webmanifest">
-    
+
     <link rel="stylesheet" href="./assets/css/leaflet.css">
     <link rel="stylesheet" href="./assets/css/styles.css">
-    
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+        integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
 </head>
+
 <body>
     <div id="app">
         <header id="header">
@@ -29,18 +33,23 @@
                 <div class="brand">SisMap</div>
             </div>
             <div class="header-actions">
-                <button class="btn-icon" onclick="locateMe()" title="Mi ubicación"><i class="fa-solid fa-location-crosshairs"></i></button>
-                <button class="btn-icon" onclick="toggleTheme()" title="Cambiar tema"><i class="fa-solid fa-moon"></i></button>
-                <button class="btn-icon" onclick="SettingsService.open()" title="Ajustes" aria-label="Abrir panel de ajustes"><i class="fa-solid fa-sliders"></i></button>
+                <button class="btn-icon" onclick="locateMe()" title="Mi ubicación"><i
+                        class="fa-solid fa-location-crosshairs"></i></button>
+                <button class="btn-icon" onclick="toggleTheme()" title="Cambiar tema"><i
+                        class="fa-solid fa-moon"></i></button>
+                <button class="btn-icon" onclick="SettingsService.open()" title="Ajustes"
+                    aria-label="Abrir panel de ajustes"><i class="fa-solid fa-sliders"></i></button>
             </div>
         </header>
 
         <main id="main">
             <div id="map"></div>
-            
+
             <div id="map-ctrl">
-                <button class="btn-icon ctrl ac" onclick="MapService.instance.zoomIn()" title="Acercar"><i class="fa-solid fa-plus"></i></button>
-                <button class="btn-icon ctrl ac" onclick="MapService.instance.zoomOut()" title="Alejar"><i class="fa-solid fa-minus"></i></button>
+                <button class="btn-icon ctrl ac" onclick="MapService.instance.zoomIn()" title="Acercar"><i
+                        class="fa-solid fa-plus"></i></button>
+                <button class="btn-icon ctrl ac" onclick="MapService.instance.zoomOut()" title="Alejar"><i
+                        class="fa-solid fa-minus"></i></button>
             </div>
 
             <div id="bottom-sheet" class="bottom-sheet collapsed">
@@ -51,8 +60,10 @@
                         <span>Terremotos recientes</span>
                     </div>
                     <div class="sheet-actions">
-                        <button class="sheet-filter-btn" onclick="toggleFilters()" title="Filtrar"><i class="fa-solid fa-filter"></i></button>
-                        <button class="sheet-chevron" id="chevron-btn" onclick="toggleSheet()"><i class="fa-solid fa-chevron-down" id="chevron-icon"></i></button>
+                        <button class="sheet-filter-btn" onclick="toggleFilters()" title="Filtrar"><i
+                                class="fa-solid fa-filter"></i></button>
+                        <button class="sheet-chevron" id="chevron-btn" onclick="toggleSheet()"><i
+                                class="fa-solid fa-chevron-down" id="chevron-icon"></i></button>
                     </div>
                 </div>
 
@@ -67,7 +78,8 @@
                     <div class="sheet-info">
                         <span id="count-text">Cargando datos…</span>
                         <span id="conn-status" class="conn-status online" role="status">
-                            <i class="fa-solid fa-wifi" aria-hidden="true"></i> <span id="conn-status-text">En línea</span>
+                            <i class="fa-solid fa-wifi" aria-hidden="true"></i> <span id="conn-status-text">En
+                                línea</span>
                         </span>
                         <span id="next-update"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> 60s</span>
                     </div>
@@ -98,7 +110,11 @@
             <div id="ab-detail" class="error__detail"></div>
         </div>
         <div class="error__close" onclick="hideAlert()" aria-label="Cerrar alerta">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" viewBox="0 0 20 20" height="20"><path fill="#fff" d="m15.8333 5.34166-1.175-1.175-4.6583 4.65834-4.65833-4.65834-1.175 1.175 4.65833 4.65834-4.65833 4.6583 1.175 1.175 4.65833-4.6583 4.6583 4.6583 1.175-1.175-4.6583-4.6583z"></path></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" viewBox="0 0 20 20" height="20">
+                <path fill="#fff"
+                    d="m15.8333 5.34166-1.175-1.175-4.6583 4.65834-4.65833-4.65834-1.175 1.175 4.65833 4.65834-4.65833 4.6583 1.175 1.175 4.65833-4.6583 4.6583 4.6583 1.175-1.175-4.6583-4.6583z">
+                </path>
+            </svg>
         </div>
         <div class="ab-progress" id="ab-progress"></div>
     </div>
@@ -112,7 +128,8 @@
                 <div class="set-title" id="set-title">
                     <i class="fa-solid fa-sliders" aria-hidden="true"></i> Ajustes
                 </div>
-                <button class="set-close" onclick="SettingsService.close()" aria-label="Cerrar ajustes"><i class="fa-solid fa-xmark"></i></button>
+                <button class="set-close" onclick="SettingsService.close()" aria-label="Cerrar ajustes"><i
+                        class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="set-body">
                 <div class="set-columns">
@@ -121,60 +138,40 @@
                         <div class="fav-card">
                             <div id="fav-zones-list" class="fav-zones-list"></div>
                             <div class="fav-add-row">
-                                <input type="text" id="fav-search-name" class="set-control" placeholder="Nombre (ej. Casa)">
-                                <input type="text" id="fav-search-city" class="set-control" autocomplete="street-address"
-                                       placeholder="Dirección o ciudad"
-                                       onkeydown="if(event.key==='Enter'){FavoritesService.searchAndAdd()}">
+                                <input type="text" id="fav-search-name" class="set-control"
+                                    placeholder="Nombre (ej. Casa)">
+                                <input type="text" id="fav-search-city" class="set-control"
+                                    autocomplete="street-address" placeholder="Dirección o ciudad"
+                                    onkeydown="if(event.key==='Enter'){FavoritesService.searchAndAdd()}">
                                 <button class="fav-add-btn" onclick="FavoritesService.searchAndAdd()">
-                                    <i class="fa-solid fa-magnifying-glass-location" aria-hidden="true"></i> Buscar y agregar
+                                    <i class="fa-solid fa-magnifying-glass-location" aria-hidden="true"></i> Buscar y
+                                    agregar
                                 </button>
                             </div>
                             <div id="fav-results" class="fav-results" aria-live="polite"></div>
-                            <p class="fav-hint">Las alertas de sismo cercano se evaluarán contra cada zona guardada y tu ubicación GPS.</p>
+                            <p class="fav-hint">Las alertas de sismo cercano se evaluarán contra cada zona guardada y tu
+                                ubicación GPS.</p>
                         </div>
                     </div>
 
-                    <div class="set-basic-settings">
-                        <div class="set-group">
-                            <label class="set-label" for="set-radius">Radio de sismos cercanos</label>
-                            <select id="set-radius" class="set-control" onchange="SettingsService.save({ nearbyRadiusKm: parseInt(this.value) })">
-                                <option value="200">200 km</option>
-                                <option value="500">500 km</option>
-                                <option value="1000">1000 km</option>
-                                <option value="1500">1500 km</option>
-                                <option value="3000">3000 km</option>
-                                <option value="5000">5000 km</option>
-                            </select>
-                        </div>
-                        <div class="set-group">
-                            <label class="set-label" for="set-threshold">Magnitud mínima para alertar</label>
-                            <select id="set-threshold" class="set-control" onchange="SettingsService.save({ alertThreshold: parseFloat(this.value) })">
-                                <option value="4.5">M 4.5+</option>
-                                <option value="5.0">M 5.0+</option>
-                                <option value="5.5">M 5.5+</option>
-                                <option value="5.9">M 5.9+</option>
-                                <option value="6.5">M 6.5+</option>
-                                <option value="7.0">M 7.0+</option>
-                            </select>
-                        </div>
-                        <div class="set-group set-toggle-row">
-                            <label class="set-label" for="set-sound">Sonido de alertas</label>
-                            <label class="set-switch">
-                                <input type="checkbox" id="set-sound" onchange="SettingsService.save({ soundEnabled: this.checked })">
-                                <span class="set-switch-track"></span>
-                            </label>
-                        </div>
-                    </div>
+                   <div class="set-basic-settings">
+    <div class="set-group set-toggle-row">
+        <label class="set-label" for="set-sound">Sonido de alertas</label>
+        <label class="set-switch">
+            <input type="checkbox" id="set-sound" onchange="SettingsService.save({ soundEnabled: this.checked })">
+            <span class="set-switch-track"></span>
+        </label>
+    </div>
+</div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- 4. RENDIMIENTO: Defer en scripts locales para no bloquear el renderizado -->
     <script src="./assets/js/config.js" defer></script>
     <script src="./assets/js/leaflet.js" defer></script>
     <script src="./assets/js/app.js" defer></script>
-    
+
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
@@ -185,4 +182,5 @@
         }
     </script>
 </body>
+
 </html>

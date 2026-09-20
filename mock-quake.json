@@ -1,0 +1,42 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "generated": 1789999999000,
+    "url": "https://mock-api.local/mock-quake.geojson",
+    "title": "USGS All Earthquakes - Simulación de Sismo Cercano",
+    "status": 200,
+    "api": "1.0.3",
+    "count": 1
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 6.5,
+        "place": "SIMULACIÓN: Sismo con epicentro en Cancún",
+        "time": 1789999999000,
+        "updated": 1789999999000,
+        "tz": null,
+        "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/simsismo01.geojson",
+        "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/simsismo01.geojson",
+        "felt": 240,
+        "cdi": 7.8,
+        "alert": "red",
+        "status": "reviewed",
+        "tsunami": 1,
+        "sig": 950,
+        "net": "us",
+        "code": "simsismo01",
+        "ids": ",simsismo01,",
+        "sources": ",us,",
+        "types": ",origin,phase-data,shakemap,",
+        "title": "M 6.5 - Simulación de Sismo"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [ -86.84656, 21.17429, 12 ]
+      },
+      "id": "simsismo01"
+    }
+  ]
+}
