@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#0a0a0a">
     <meta name="description" content="Mapa sísmico en tiempo real con alertas de tsunami, rutas de evacuación y clima local.">
     
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://earthquake.usgs.gov https://www.seismicportal.eu https://api.open-meteo.com https://api.weather.gov https://nominatim.openstreetmap.org https://router.project-osrm.org; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://basemaps.cartocdn.com https://earthquake.usgs.gov; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' data: https://cdnjs.cloudflare.com https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; media-src 'self' https://assets.mixkit.co;">
-
+<!-- 1. SEGURIDAD: Content Security Policy (CSP) previene ataques XSS e inyecciones de código -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://earthquake.usgs.gov https://www.seismicportal.eu https://api.open-meteo.com https://api.weather.gov https://nominatim.openstreetmap.org https://router.project-osrm.org; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://basemaps.cartocdn.com https://earthquake.usgs.gov; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' data: https://cdnjs.cloudflare.com https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; media-src 'self' https://assets.mixkit.co;">
     <link rel="preconnect" href="https://earthquake.usgs.gov">
     <link rel="preconnect" href="https://api.open-meteo.com">
     <link rel="preconnect" href="https://basemaps.cartocdn.com">

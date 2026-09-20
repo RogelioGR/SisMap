@@ -39,7 +39,7 @@ const Config = {
         DEFAULT_ZOOM: 3,
         MIN_ZOOM: 2,
         MAX_ZOOM: 19,
-        TILE_LIGHT: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+TILE_LIGHT: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
         TILE_DARK: `https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=${ENV.CARTO_API_KEY}`,
         ATTRIBUTION: '© OpenStreetMap contributors',
         ATTRIBUTION_DARK: '© OpenStreetMap contributors © CARTO'
