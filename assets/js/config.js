@@ -1,3 +1,5 @@
+"use strict"; 
+
 const ENV = {
     CARTO_API_KEY: 'cb1_2xn4_1_038a5c68ca6fbbb0ca36839f',
     USGS_API_URL: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson',
@@ -80,11 +82,6 @@ const Store = {
     favoriteMarkersLayer: null
 };
 
-const ICONS = {
-    earthquake: '<svg viewBox="0 0 24 24" fill="none"><path d="M2 12h3l2-7 3 14 2-9 2 4h8" stroke="#f97316" stroke-width="2" stroke-linecap="round"/></svg>',
-    tsunami: '<svg viewBox="0 0 24 24" fill="none"><path d="M2 18c2-4 4-6 6-4s4 4 6 0 4-4 6-2" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/></svg>'
-};
-
 /* SERVICIO DE INDEXEDDB */
 const DBService = {
     db: null,
@@ -161,4 +158,9 @@ const DBService = {
             request.onerror = () => reject(request.error);
         });
     }
+};
+
+const ICONS = {
+    earthquake: '<svg viewBox="0 0 24 24" fill="none"><path d="M2 12h3l2-7 3 14 2-9 2 4h8" stroke="#f97316" stroke-width="2" stroke-linecap="round"/></svg>',
+    tsunami: '<svg viewBox="0 0 24 24" fill="none"><path d="M2 18c2-4 4-6 6-4s4 4 6 0 4-4 6-2" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/></svg>'
 };

@@ -1,4 +1,13 @@
+"use strict";
+
 const Utils = {
+    // Seguridad: Sanitización estricta de inputs para prevenir XSS
+    sanitize: (str) => {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML.replace(/[<>"'{}]/g, '').trim().substring(0, 120);
+    },
     getColorKey: (mag) => {
         if (mag >= 5.9) return 'HIGH';
         if (mag >= 3.9) return 'MED';
@@ -52,7 +61,9 @@ const Utils = {
             timeStr: Utils.formatDate(timestamp),
             types: props.types || '',
             detailUrl: props.detail || '',
-            distance: null
+            distance: null,
+            felt: props.felt || 0,
+            cdi: props.cdi || 0
         };
     },
     timeAgo: (timestamp) => {
@@ -109,7 +120,7 @@ const MapService = {
             maxZoom: Config.MAP.MAX_ZOOM,
             zoomControl: false,
             maxBounds: L.latLngBounds([-85, -180], [85, 180]),
-            preferCanvas: true // Optimización de renderizado nativo de Leaflet
+            preferCanvas: true
         });
         MapService.updateTheme(document.documentElement.getAttribute('data-theme') || 'dark');
     },
@@ -153,7 +164,6 @@ const MapService = {
             }
         });
         
-        // Renderizado en lotes optimizado a 30 por frame para mayor rapidez
         const batchSize = 30; 
         let i = 0;
         const addBatch = () => {
@@ -285,14 +295,15 @@ const MapService = {
         }
     },
     searchCity: async function(query) {
-        if (!query || !query.trim()) return null;
+        const safeQuery = Utils.sanitize(query);
+        if (!safeQuery) return null;
         Utils.showToast('Buscando ciudad…');
         try {
-            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query.trim())}`);
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(safeQuery)}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const results = await res.json();
             if (!results.length) {
-                Utils.showToast(`No se encontró "${query}"`);
+                Utils.showToast(`No se encontró "${safeQuery}"`);
                 return null;
             }
             const { lat, lon, display_name } = results[0];
@@ -308,7 +319,7 @@ const MapService = {
         }
     },
     searchAddress: async function(query) {
-        const raw = (query || '').trim();
+        const raw = Utils.sanitize(query);
         if (!raw) return [];
         const parts = raw.split(',').map(p => p.trim()).filter(Boolean);
         const stripNum = s => s.replace(/\s*(#|no\.?|núm\.?|num\.?)?\s*\d+\s*[a-z]?$/i, '').trim();
@@ -407,24 +418,17 @@ const UIService = {
     createPopupContent: (eq) => {
         const fecha = Utils.formatDate(eq.time, true);
         const depthLbl = eq.depth < 70 ? 'superficial' : eq.depth < 300 ? 'intermedia' : 'profunda';
-        const tsAlert = eq.tsunami ? `
-            <div class="ts-popup-alert">
-                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> 
-                ALERTA DE TSUNAMI
-            </div>` : '';
+        const tsAlert = eq.tsunami ? `<div class="ts-popup-alert"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> ALERTA DE TSUNAMI</div>` : '';
         
-        const shareBtn = `
-  <button class="eq-popup-link eq-popup-action" onclick="UIService.shareQuake(Store.quakes.find(q => q.id === '${eq.id}'))">
-        <img src="./assets/iconoApp.png" alt="" style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">
-        Compartir
-    </button>`;
+        const shareBtn = `<button class="eq-popup-link eq-popup-action" onclick="UIService.shareQuake(Store.quakes.find(q => q.id === '${eq.id}'))"><img src="./assets/iconoApp.png" alt="" style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">Compartir</button>`;
+        const shakeMapBtn = (eq.types && eq.types.includes('shakemap')) ? `<button class="eq-popup-link eq-popup-action eq-popup-shakemap" onclick="MapService.toggleShakeMap('${eq.detailUrl}')"><img src="./assets/iconoApp.png" alt="" style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">ShakeMap</button>` : '';
 
-        const hasShakeMap = eq.types && eq.types.includes('shakemap');
-        const shakeMapBtn = hasShakeMap ? `
-              <button class="eq-popup-link eq-popup-action eq-popup-shakemap" onclick="MapService.toggleShakeMap('${eq.detailUrl}')">
-        <img src="./assets/iconoApp.png" alt="" style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">
-        ShakeMap
-    </button>` : '';
+        const feltHtml = eq.felt > 0 ? `
+            <div class="eq-popup-item" style="grid-column: span 2; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2);">
+                <div class="eq-popup-label" style="color: var(--accent);"><i class="fa-solid fa-users"></i> REPORTE DE LA COMUNIDAD</div>
+                <div class="eq-popup-value" style="font-size: 13px; margin-top: 4px;">Sentido por ${eq.felt} persona(s) <span style="font-size: 11px; font-weight: normal; color: var(--muted);">(Intensidad máx: ${eq.cdi.toFixed(1)})</span></div>
+            </div>
+        ` : '';
 
         return `
             <div class="eq-popup" role="article" aria-label="Detalles del sismo">
@@ -445,6 +449,7 @@ const UIService = {
                         <div class="eq-popup-value">${eq.depth.toFixed(0)} km</div>
                         <div class="eq-popup-sub">${depthLbl}</div>
                     </div>
+                    ${feltHtml}
                 </div>
                 ${eq.url ? `<a href="${eq.url}" target="_blank" rel="noopener noreferrer" class="eq-popup-link" style="display:block;text-align:center;margin-bottom:4px;color:var(--accent);font-size:12px;font-weight:600;">Ver detalles oficiales</a>` : ''}
                 <div style="display:flex;gap:6px;">
@@ -458,17 +463,16 @@ const UIService = {
     buildCard: (eq) => {
         const colorMap = { HIGH: 'r', MED: 'o', LOW: 'g' };
         const wrapper = document.createElement('div');
-        const distBadge = Store.userLocation && eq.distance
-            ? `<span class="dist-badge" aria-label="A ${Utils.formatDistance(eq.distance)}">${Utils.formatDistance(eq.distance)}</span>`
-            : '';
-        const tsBadge = eq.tsunami
-            ? `<span class="ts-badge" data-id="${eq.id}" role="alert"> Tsunami</span>`
-            : '';
+        
+        const distBadge = Store.userLocation && eq.distance ? `<span class="dist-badge" aria-label="A ${Utils.formatDistance(eq.distance)}">${Utils.formatDistance(eq.distance)}</span>` : '';
+        const tsBadge = eq.tsunami ? `<span class="ts-badge" data-id="${eq.id}" role="alert"> Tsunami</span>` : '';
+        const feltBadge = eq.felt > 0 ? `<span title="Sentido por ${eq.felt} personas" style="display:inline-flex; align-items:center; gap:4px; font-size:10px; color:var(--accent); background:rgba(59,130,246,0.1); padding:2px 6px; border-radius:10px; margin-left:6px;"><i class="fa-solid fa-users"></i> ${eq.felt}</span>` : '';
+
         wrapper.innerHTML = `
             <div class="eq-card c${colorMap[eq.colorKey] || 'g'}" data-id="${eq.id}" role="button" tabindex="0" aria-label="Sismo magnitud ${eq.label} en ${eq.place}">
                 <div class="eq-icon" aria-hidden="true"><i class="fa-solid fa-wave-square"></i></div>
                 <div class="eq-content">
-                    <div class="eq-place">${eq.place} ${distBadge}</div>
+                    <div class="eq-place">${eq.place} ${distBadge} ${feltBadge}</div>
                     <div class="eq-meta">
                         <span><i class="fa-regular fa-clock" aria-hidden="true"></i> ${eq.timeStr}</span>
                         <span><i class="fa-solid fa-ruler-combined" aria-hidden="true"></i> ${eq.depth.toFixed(0)} km</span>
@@ -502,22 +506,21 @@ const UIService = {
             return;
         }
 
-        // OPTIMIZACIÓN: Removemos nodos que ya no están en la lista usando Set para acceso rápido (O(1))
         const filteredIds = new Set(filtered.map(eq => eq.id));
         Array.from(container.children).forEach(node => {
-            if (node.dataset.id && !filteredIds.has(node.dataset.id)) {
+            if (node.classList.contains('empty-state')) {
+                node.remove();
+            } else if (node.dataset.id && !filteredIds.has(node.dataset.id)) {
                 node.remove();
             }
         });
 
-        // OPTIMIZACIÓN: DocumentFragment para inyectar todas las tarjetas nuevas de golpe al DOM
         const fragment = document.createDocumentFragment();
         
         filtered.forEach((eq, index) => {
             let card = container.querySelector(`[data-id="${eq.id}"]`);
             if (!card) {
                 card = UIService.buildCard(eq);
-                // Limitamos la demora de animación a los primeros 10 elementos para no trabar cargas largas
                 card.style.animationDelay = `${Math.min(index, 10) * 20}ms`;
                 fragment.appendChild(card);
             } else {
@@ -573,7 +576,7 @@ const DataService = {
             sorted.forEach(q => Store.knownIds[q.id] = true);
             
             UIService.refreshView();
-            SpinnerService.hide(); // Oculta spinner instantáneamente si hay caché
+            SpinnerService.hide();
             return true;
         } catch (err) {
             console.warn('[DataService] No se pudo precargar caché:', err);
@@ -602,7 +605,6 @@ const DataService = {
     },
     fetchQuakes: async () => {
         try {
-            // Paralelización de peticiones para obtener de ambas APIs al mismo tiempo
             const [res1, res2] = await Promise.allSettled([
                 DataService.fetchWithRetry(Config.API_URL),
                 DataService.fetchWithRetry(Config.API_URL_2)
@@ -632,7 +634,6 @@ const DataService = {
             
             const changed = newQuakes.length !== Store.quakes.length || newQuakes[0]?.id !== Store.quakes[0]?.id;
             if (changed) {
-                // Guarda en IndexedDB de fondo sin bloquear el hilo principal
                 DBService.saveQuakes(newQuakes).catch(err => console.warn('[DB] Caché falló:', err));
             }
             
@@ -928,8 +929,22 @@ const AlertService = {
         
         if ('Notification' in window && Notification.permission === 'granted') {
             const notifyText = typeof cfg.notify === 'function' ? cfg.notify(eq) : cfg.notify;
-            new Notification(notifyText, { body: eq.place, icon: './assets/iconoApp.png', requireInteraction: true });
+            const vibratePattern = isTsunami ? [800, 400, 800, 400, 800, 1000, 2000] : [300, 150, 300, 150, 300];
+            
+            navigator.serviceWorker.ready.then(reg => {
+                reg.showNotification(notifyText, {
+                    body: `${eq.place}\nMagnitud: ${eq.label} - Prof: ${eq.depth.toFixed(0)} km`,
+                    icon: './assets/iconoApp.png',
+                    vibrate: vibratePattern,
+                    requireInteraction: true,
+                    tag: isTsunami ? 'tsunami-critical' : 'quake-alert',
+                    renotify: true 
+                });
+            }).catch(() => {
+                new Notification(notifyText, { body: eq.place, icon: './assets/iconoApp.png', requireInteraction: true, vibrate: vibratePattern });
+            });
         }
+        
         Utils.announceToScreenReader(isTsunami ? 'Alerta de tsunami' : `Sismo magnitud ${eq.label} en ${eq.place}`);
     },
     hide: () => {
@@ -940,6 +955,56 @@ const AlertService = {
             banner.removeAttribute('aria-live');
         }
         AlertService.stopAll();
+    }
+};
+
+/* SERVICIO DE RUTAS DE EVACUACIÓN (OSRM) */
+const EvacuationService = {
+    routeLayer: null,
+    calculateSafePoint: (userLat, userLng, eqLat, eqLng) => {
+        const dy = userLat - eqLat;
+        const dx = userLng - eqLng;
+        const angle = Math.atan2(dy, dx);
+        const distanceDeg = 3 / 111.32; 
+        return {
+            lat: userLat + Math.sin(angle) * distanceDeg,
+            lng: userLng + Math.cos(angle) * distanceDeg
+        };
+    },
+    drawRoute: async (eqLat, eqLng) => {
+        if (!Store.userLocation) {
+            Utils.showToast('Se requiere tu ubicación GPS para trazar la ruta');
+            return;
+        }
+        Utils.showToast('Calculando ruta a terreno seguro...');
+        
+        const start = Store.userLocation;
+        const end = EvacuationService.calculateSafePoint(start.lat, start.lng, eqLat, eqLng);
+        
+        try {
+            const res = await fetch(`https://router.project-osrm.org/route/v1/foot/${start.lng},${start.lat};${end.lng},${end.lat}?geometries=geojson`);
+            const data = await res.json();
+            
+            if (data.routes && data.routes.length > 0) {
+                const routeCoords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+                
+                if (EvacuationService.routeLayer && MapService.instance) {
+                    MapService.instance.removeLayer(EvacuationService.routeLayer);
+                }
+                
+                EvacuationService.routeLayer = L.polyline(routeCoords, {
+                    color: '#3b82f6', weight: 6, dashArray: '10, 12', lineCap: 'round'
+                }).addTo(MapService.instance);
+                
+                MapService.instance.fitBounds(EvacuationService.routeLayer.getBounds(), { padding: [40, 40] });
+                TsunamiService.close();
+                BottomSheet.collapse();
+                Utils.showToast('Sigue la ruta punteada azul hacia terreno seguro', 5000);
+            }
+        } catch (err) {
+            console.warn('[Evacuation] Error:', err);
+            Utils.showToast('No se pudo establecer conexión con el servidor de rutas');
+        }
     }
 };
 
@@ -987,8 +1052,9 @@ const FavoritesService = {
         SettingsService.close();
     },
     searchAndAdd: async () => {
-        const query = document.getElementById('fav-search-city')?.value.trim();
-        if (!query) return Utils.showToast('Escribe una dirección o ciudad');
+        const rawQuery = document.getElementById('fav-search-city')?.value;
+        const query = Utils.sanitize(rawQuery);
+        if (!query) return Utils.showToast('Escribe una dirección o ciudad válida');
         
         const results = await MapService.searchAddress(query);
         if (!results.length) return Utils.showToast(`No se encontró "${query}"`);
@@ -1015,15 +1081,19 @@ const FavoritesService = {
     pick: async (i) => {
         const r = FavoritesService.pending[i];
         if (!r) return;
-        const nameInput = document.getElementById('fav-search-name');
-        const addrInput = document.getElementById('fav-search-city');
+        const rawName = document.getElementById('fav-search-name')?.value;
+        const nameInput = Utils.sanitize(rawName);
+        const addrInputEl = document.getElementById('fav-search-city');
         const fallbackName = FavoritesService.pendingQuery.split(',')[0].trim() || r.label.split(',')[0];
-        const zone = await FavoritesService.add(nameInput?.value.trim() || fallbackName, r.lat, r.lng, r.label, r.precise);
+        
+        const zone = await FavoritesService.add(nameInput || fallbackName, r.lat, r.lng, r.label, r.precise);
         if (!r.precise) Utils.showToast('Ubicación aproximada');
         FavoritesService.pending = [];
         FavoritesService.renderResults();
-        if (nameInput) nameInput.value = '';
-        if (addrInput) addrInput.value = '';
+        
+        const nameEl = document.getElementById('fav-search-name');
+        if (nameEl) nameEl.value = '';
+        if (addrInputEl) addrInputEl.value = '';
         FavoritesService.flyTo(zone.id);
     },
     render: () => {
@@ -1174,7 +1244,7 @@ const TsunamiService = {
             <div class="tsm-body">
                 <div class="tsm-warn" role="alert">
                     <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-                    <div><strong>ALERTA ACTIVA:</strong> Potencial tsunamigénico. Evacúe a zonas altas.</div>
+                    <div><strong>ALERTA ACTIVA:</strong> Potencial tsunamigénico. Evacúe a zonas altas de inmediato.</div>
                 </div>
                 <div class="tsm-section">
                     <h3>Datos del Evento</h3>
@@ -1184,7 +1254,9 @@ const TsunamiService = {
                     </div>
                 </div>
                 <div class="tsm-actions">
-                    <button class="tsm-btn" onclick="TsunamiService.close()">Cerrar</button>
+                    <button class="tsm-btn" style="background: var(--red); color: white; border-color: var(--red);" onclick="EvacuationService.drawRoute(${eq.lat}, ${eq.lng})">
+                        <i class="fa-solid fa-person-running"></i> Trazar Evacuación
+                    </button>
                     ${eq.url ? `<a href="${eq.url}" target="_blank" rel="noopener noreferrer" class="tsm-btn danger">Ver Detalles</a>` : ''}
                 </div>
             </div>
@@ -1316,17 +1388,14 @@ const ConnectionService = {
 
 /* INICIALIZACIÓN OPTIMIZADA DE CARGA RÁPIDA */
 document.addEventListener('DOMContentLoaded', async () => {
-    // 1. Tareas Críticas (Visuales y de base de datos)
     MapService.init();
     BottomSheet.init();
     UIService.initDelegation();
     await DBService.init?.().catch(err => console.warn('[DB] Error:', err));
     
-    // 2. Pintar datos de la caché instantáneamente (Acelera la percepción de carga)
     const hasCache = await DataService.loadCachedFirst();
     if (hasCache) SpinnerService.hide();
 
-    // Failsafe del spinner
     setTimeout(() => {
         if (!SpinnerService.hidden) {
             SpinnerService.hide();
@@ -1334,7 +1403,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }, 8000);
 
-    // 3. Tareas en segundo plano (No bloquean el hilo visual principal)
     setTimeout(() => {
         DataService.fetchQuakes();
         DataService.startAutoRefresh();
@@ -1348,9 +1416,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if ('Notification' in window && Notification.permission === 'default') {
             Notification.requestPermission();
         }
-    }, 150); // Pequeño respiro al procesador
+    }, 150); 
 
-    // Métodos globales accesibles desde el HTML
     Object.assign(window, {
         toggleTheme: () => {
             const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';

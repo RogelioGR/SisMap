@@ -4,16 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#0a0a0a">
-    <meta name="description" content="Mapa sísmico en tiempo real con alertas de tsunami y sismos cercanos.">
-    <title>Mapa Sísmico</title>
+    <meta name="description" content="Mapa sísmico en tiempo real con alertas de tsunami, rutas de evacuación y clima local.">
+    
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://earthquake.usgs.gov https://www.seismicportal.eu https://api.open-meteo.com https://api.weather.gov https://nominatim.openstreetmap.org https://router.project-osrm.org; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://basemaps.cartocdn.com https://earthquake.usgs.gov; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' data: https://cdnjs.cloudflare.com https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; media-src 'self' https://assets.mixkit.co;">
+
+    <link rel="preconnect" href="https://earthquake.usgs.gov">
+    <link rel="preconnect" href="https://api.open-meteo.com">
+    <link rel="preconnect" href="https://basemaps.cartocdn.com">
+
+    <title>SisMap</title>
     <link rel="icon" type="image/png" href="./assets/iconoApp.png">
     <link rel="manifest" href="./manifest.webmanifest">
     
     <link rel="stylesheet" href="./assets/css/leaflet.css">
     <link rel="stylesheet" href="./assets/css/styles.css">
-    <link rel="stylesheet" href="./assets/css/Loader.css">
     
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
 </head>
 <body>
     <div id="app">
@@ -98,8 +104,8 @@
     </div>
 
     <div id="tsunami-modal"></div>
+    <div id="weather-modal"></div>
 
-    <!-- PANEL DE AJUSTES -->
     <div id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="set-title">
         <div class="set-box">
             <div class="set-head">
@@ -117,14 +123,14 @@
                             <div class="fav-add-row">
                                 <input type="text" id="fav-search-name" class="set-control" placeholder="Nombre (ej. Casa)">
                                 <input type="text" id="fav-search-city" class="set-control" autocomplete="street-address"
-                                       placeholder="Dirección o ciudad (ej. Emiliano Zapata 21, Centro, 39000 Chilpancingo de los Bravo, Gro.)"
+                                       placeholder="Dirección o ciudad"
                                        onkeydown="if(event.key==='Enter'){FavoritesService.searchAndAdd()}">
                                 <button class="fav-add-btn" onclick="FavoritesService.searchAndAdd()">
                                     <i class="fa-solid fa-magnifying-glass-location" aria-hidden="true"></i> Buscar y agregar
                                 </button>
                             </div>
                             <div id="fav-results" class="fav-results" aria-live="polite"></div>
-                            <p class="fav-hint">Puedes escribir una dirección completa o solo una ciudad. Las alertas de sismo cercano se evaluarán también contra cada zona guardada, además de tu ubicación GPS.</p>
+                            <p class="fav-hint">Las alertas de sismo cercano se evaluarán contra cada zona guardada y tu ubicación GPS.</p>
                         </div>
                     </div>
 
@@ -163,20 +169,17 @@
             </div>
         </div>
     </div>
-    <!-- MODAL DE CLIMA -->
-    <div id="weather-modal"></div>
 
-   
-
-    <script src="./assets/js/config.js"></script>
-    <script src="./assets/js/leaflet.js"></script>
-    <script src="./assets/js/app.js"></script>
+    <!-- 4. RENDIMIENTO: Defer en scripts locales para no bloquear el renderizado -->
+    <script src="./assets/js/config.js" defer></script>
+    <script src="./assets/js/leaflet.js" defer></script>
+    <script src="./assets/js/app.js" defer></script>
     
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./sw.js')
-                    .then(reg => console.log('[SW] Registrado:', reg.scope))
+                    .then(reg => console.log('[SW] Registrado'))
                     .catch(err => console.log('[SW] Error:', err));
             });
         }
